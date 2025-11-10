@@ -1,6 +1,9 @@
 #!/bin/bash
 # Quick Start Script for Train Trip Planner
 
+# Change to script directory
+cd "$(dirname "$0")"
+
 echo "🚂 Train Trip Planner - Quick Start"
 echo "===================================="
 echo ""

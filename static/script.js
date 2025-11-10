@@ -175,16 +175,27 @@ function displayStops(stops, route) {
         const stopId = `stop-${stop.id}`;
         
         stopItem.innerHTML = `
-            <input type="checkbox" id="${stopId}" data-city="${stop.city_name}">
-            <label for="${stopId}">${stop.city_name} - Arrival: ${stop.arrival_time}, Departure: ${stop.departure_time}</label>
+            <div class="stop-checkbox-container">
+                <input type="checkbox" id="${stopId}" data-city="${stop.city_name}">
+                <label for="${stopId}">${stop.city_name} - Arrival: ${stop.stop_time}</label>
+            </div>
+            <div class="stop-duration-container" id="duration-${stopId}" style="display: none;">
+                <label for="duration-input-${stopId}">Stop duration (hours):</label>
+                <input type="number" id="duration-input-${stopId}" min="0" max="24" step="0.5" value="2" class="duration-input">
+            </div>
         `;
         
         const checkbox = stopItem.querySelector('input[type="checkbox"]');
+        const durationContainer = stopItem.querySelector(`#duration-${stopId}`);
+        const durationInput = stopItem.querySelector(`.duration-input`);
+        
         checkbox.addEventListener('change', function() {
             if (this.checked) {
                 stopItem.classList.add('checked');
+                durationContainer.style.display = 'flex';
             } else {
                 stopItem.classList.remove('checked');
+                durationContainer.style.display = 'none';
             }
         });
         
@@ -197,8 +208,10 @@ function displayStops(stops, route) {
         const destItem = document.createElement('div');
         destItem.className = 'stop-item checked';
         destItem.innerHTML = `
-            <input type="checkbox" id="stop-dest" checked disabled data-city="${route.destination_city}">
-            <label for="stop-dest">${route.destination_city} - <strong>Destination (Arrival: ${route.arrival_time})</strong></label>
+            <div class="stop-checkbox-container">
+                <input type="checkbox" id="stop-dest" checked disabled data-city="${route.destination_city}">
+                <label for="stop-dest">${route.destination_city} - <strong>Destination (Arrival: ${route.arrival_time})</strong></label>
+            </div>
         `;
         stopsList.appendChild(destItem);
     }
@@ -206,13 +219,21 @@ function displayStops(stops, route) {
 
 // Generate the trip schedule
 async function generateSchedule() {
-    const selectedStops = [];
+    const selectedStopsData = [];
     
-    // Get all checked stops (excluding origin and destination which are always checked)
+    // Get all checked stops with their durations
     document.querySelectorAll('.stop-item input[type="checkbox"]:checked:not(:disabled)').forEach(checkbox => {
         const city = checkbox.getAttribute('data-city');
         if (city) {
-            selectedStops.push(city);
+            // Find the duration input for this stop
+            const stopId = checkbox.id;
+            const durationInput = document.querySelector(`#duration-input-${stopId}`);
+            const duration = durationInput ? parseFloat(durationInput.value) : 0;
+            
+            selectedStopsData.push({
+                city: city,
+                duration: duration
+            });
         }
     });
     
@@ -233,7 +254,7 @@ async function generateSchedule() {
             },
             body: JSON.stringify({
                 route_id: currentRoute.id,
-                selected_stops: selectedStops,
+                selected_stops: selectedStopsData,
                 start_date: startDate
             })
         });
@@ -264,7 +285,60 @@ function displaySchedule(data) {
     const scheduleBody = document.getElementById('scheduleBody');
     scheduleBody.innerHTML = '';
     
-    data.schedule.forEach(event => {
+    // Get selected stops with durations for reference
+    const selectedStopsMap = {};
+    document.querySelectorAll('.stop-item input[type="checkbox"]:checked:not(:disabled)').forEach(checkbox => {
+        const city = checkbox.getAttribute('data-city');
+        if (city) {
+            const stopId = checkbox.id;
+            const durationInput = document.querySelector(`#duration-input-${stopId}`);
+            const duration = durationInput ? parseFloat(durationInput.value) : 0;
+            selectedStopsMap[city] = duration;
+        }
+    });
+    
+    // Track which selected stops have already had their duration rows added
+    const durationRowsAdded = new Set();
+    
+    data.schedule.forEach((event, index) => {
+        // Check if the next event is a reboarding event (same city, both Stop events)
+        const nextEvent = index + 1 < data.schedule.length ? data.schedule[index + 1] : null;
+        const isBeforeReboarding = nextEvent && nextEvent.city === event.city && event.event === 'Stop' && nextEvent.event === 'Stop';
+        
+        // If this is a Stop event at a selected stop with duration, and the next event is reboarding,
+        // add the duration row BEFORE adding the reboarding event
+        if (isBeforeReboarding && selectedStopsMap.hasOwnProperty(event.city) && selectedStopsMap[event.city] > 0 && !durationRowsAdded.has(event.city)) {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${event.date}</td>
+                <td>${event.time}</td>
+                <td><strong>${event.city}</strong></td>
+                <td>${event.event}</td>
+            `;
+            scheduleBody.appendChild(row);
+            
+            // Add duration row
+            const durationRow = document.createElement('tr');
+            durationRow.className = 'duration-row';
+            const stopDuration = selectedStopsMap[event.city];
+            const arrivalTime = new Date(`${event.date}T${event.time}`);
+            const departureTime = new Date(arrivalTime.getTime() + stopDuration * 60 * 60 * 1000);
+            const departureTimeStr = departureTime.toTimeString().slice(0, 5);
+            
+            durationRow.innerHTML = `
+                <td>${departureTime.toISOString().split('T')[0]}</td>
+                <td>${departureTimeStr}</td>
+                <td><em>${event.city} - Stop Duration</em></td>
+                <td>${stopDuration} hour(s)</td>
+            `;
+            scheduleBody.appendChild(durationRow);
+            durationRowsAdded.add(event.city);
+            
+            // Skip adding this event again, move to next
+            return;
+        }
+        
+        // Add the normal event row
         const row = document.createElement('tr');
         row.innerHTML = `
             <td>${event.date}</td>

@@ -251,6 +251,42 @@ section h2 {
     background-color: #f0fdf4;
 }
 
+.stop-checkbox-container {
+    display: flex;
+    align-items: center;
+    flex: 1;
+}
+
+.stop-duration-container {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 0;
+    border-top: 1px solid #e0e0e0;
+    margin-top: 8px;
+}
+
+.stop-duration-container label {
+    margin: 0;
+    font-size: 0.9em;
+    white-space: nowrap;
+    color: #555;
+}
+
+.duration-input {
+    width: 80px;
+    padding: 6px 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 0.9em;
+}
+
+.duration-input:focus {
+    outline: none;
+    border-color: #667eea;
+    box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.1);
+}
+
 /* Schedule Table */
 .schedule-table {
     width: 100%;
@@ -377,4 +413,16 @@ button:focus {
     border-radius: 6px;
     margin: 10px 0;
     border-left: 4px solid #48bb78;
+}
+
+/* Duration rows in schedule */
+.duration-row {
+    background-color: #fef3c7;
+    font-style: italic;
+    opacity: 0.9;
+}
+
+.duration-row td {
+    padding: 10px;
+    border: 1px solid #fbbf24;
 }
