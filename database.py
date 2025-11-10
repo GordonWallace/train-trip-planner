@@ -3,11 +3,19 @@ Database initialization and management for the train trip planner.
 """
 import sqlite3
 import os
+import csv
+from pathlib import Path
 
 DATABASE_PATH = os.path.join(os.path.dirname(__file__), 'train_routes.db')
+SCHEDULES_DIR = os.path.join(os.path.dirname(__file__), 'schedules')
 
 def init_database():
-    """Initialize the database with schema and sample data."""
+    """Initialize the database with schema and load data from CSV files."""
+    # Always delete and recreate the database to get fresh data from CSVs
+    db_path = DATABASE_PATH
+    if os.path.exists(db_path):
+        os.remove(db_path)
+    
     conn = sqlite3.connect(DATABASE_PATH)
     c = conn.cursor()
     
@@ -37,138 +45,122 @@ def init_database():
                   name TEXT UNIQUE,
                   state TEXT)''')
     
-    # Check if we already have data
-    c.execute('SELECT COUNT(*) FROM routes')
-    if c.fetchone()[0] == 0:
-        # Insert sample Amtrak-inspired routes
-        sample_routes = [
-            ('1', 'Northeast Regional', 'Boston', 'New York', '08:00', '11:30', 3),
-            ('2', 'Northeast Regional', 'New York', 'Philadelphia', '12:00', '14:45', 2),
-            ('3', 'Northeast Regional', 'Philadelphia', 'Washington DC', '15:15', '17:30', 2),
-            ('4', 'Northeast Regional', 'Washington DC', 'Richmond', '18:00', '20:15', 2),
-            ('5', 'Silver Star', 'New York', 'Miami', '07:00', '12:30', 29),
-            ('6', 'Lake Shore Limited', 'Boston', 'Chicago', '09:00', '15:45', 30),
-            ('7', 'Capitol Limited', 'Chicago', 'Washington DC', '14:30', '10:00', 19),
-            ('8', 'California Zephyr', 'Chicago', 'Denver', '08:00', '12:00', 28),
-            ('9', 'Southwest Chief', 'Denver', 'Los Angeles', '15:00', '20:00', 29),
-            ('10', 'Empire Builder', 'Chicago', 'Seattle', '01:00', '20:15', 45),
-        ]
-        
-        for route in sample_routes:
-            c.execute('''INSERT INTO routes 
-                         (route_number, route_name, origin_city, destination_city, 
-                          departure_time, arrival_time, duration_hours)
-                         VALUES (?, ?, ?, ?, ?, ?, ?)''', route)
-        
-        # Get route IDs for adding stops
-        c.execute('SELECT id, origin_city, destination_city FROM routes')
-        routes_data = c.fetchall()
-        
-        # Sample stops (intermediate stops on routes)
-        stops_data = [
-            # Northeast Regional stops (Boston to New York)
-            (1, 1, 'Boston', '08:00'),
-            (1, 2, 'Providence', '08:55'),
-            (1, 3, 'New Haven', '09:40'),
-            (1, 4, 'New York', '11:30'),
-            
-            (2, 1, 'New York', '12:15'),
-            (2, 2, 'New Brunswick', '12:55'),
-            (2, 3, 'Philadelphia', '14:45'),
-            
-            (3, 1, 'Philadelphia', '15:30'),
-            (3, 2, 'Baltimore', '16:30'),
-            (3, 3, 'Washington DC', '17:30'),
-            
-            (4, 1, 'Washington DC', '18:15'),
-            (4, 2, 'Petersburg', '19:45'),
-            (4, 3, 'Richmond', '20:15'),
-            
-            # Silver Star stops
-            (5, 1, 'New York', '07:30'),
-            (5, 2, 'Baltimore', '09:15'),
-            (5, 3, 'Washington DC', '11:00'),
-            (5, 4, 'Charlotte', '15:00'),
-            (5, 5, 'Savannah', '20:30'),
-            (5, 6, 'Jacksonville', '23:30'),
-            (5, 7, 'Miami', '12:30'),
-            
-            # Lake Shore Limited stops
-            (6, 1, 'Boston', '09:30'),
-            (6, 2, 'New York', '12:30'),
-            (6, 3, 'Buffalo', '18:30'),
-            (6, 4, 'Cleveland', '00:00'),
-            (6, 5, 'Chicago', '15:45'),
-            
-            # Capitol Limited stops
-            (7, 1, 'Chicago', '15:00'),
-            (7, 2, 'Indianapolis', '19:30'),
-            (7, 3, 'Cincinnati', '23:00'),
-            (7, 4, 'Washington DC', '10:00'),
-            
-            # California Zephyr stops
-            (8, 1, 'Chicago', '08:30'),
-            (8, 2, 'Milwaukee', '10:00'),
-            (8, 3, 'Des Moines', '14:30'),
-            (8, 4, 'Denver', '12:00'),
-            
-            # Southwest Chief stops
-            (9, 1, 'Denver', '15:30'),
-            (9, 2, 'Kansas City', '20:30'),
-            (9, 3, 'Albuquerque', '03:30'),
-            (9, 4, 'Los Angeles', '20:00'),
-            
-            # Empire Builder stops
-            (10, 1, 'Chicago', '01:30'),
-            (10, 2, 'Minneapolis', '10:30'),
-            (10, 3, 'Fargo', '14:30'),
-            (10, 4, 'Spokane', '13:30'),
-            (10, 5, 'Seattle', '20:15'),
-        ]
-        
-        for stop in stops_data:
-            c.execute('''INSERT INTO stops 
-                         (route_id, stop_number, city_name, stop_time)
-                         VALUES (?, ?, ?, ?)''', stop)
-        
-        # Insert cities
-        cities_data = [
-            ('Boston', 'MA'),
-            ('New York', 'NY'),
-            ('Philadelphia', 'PA'),
-            ('Washington DC', 'DC'),
-            ('Richmond', 'VA'),
-            ('Baltimore', 'MD'),
-            ('Charlotte', 'NC'),
-            ('Savannah', 'GA'),
-            ('Jacksonville', 'FL'),
-            ('Miami', 'FL'),
-            ('New Haven', 'CT'),
-            ('Providence', 'RI'),
-            ('New Brunswick', 'NJ'),
-            ('Petersburg', 'VA'),
-            ('Chicago', 'IL'),
-            ('Milwaukee', 'WI'),
-            ('Des Moines', 'IA'),
-            ('Denver', 'CO'),
-            ('Kansas City', 'MO'),
-            ('Albuquerque', 'NM'),
-            ('Los Angeles', 'CA'),
-            ('Minneapolis', 'MN'),
-            ('Fargo', 'ND'),
-            ('Spokane', 'WA'),
-            ('Seattle', 'WA'),
-            ('Cleveland', 'OH'),
-            ('Cincinnati', 'OH'),
-            ('Indianapolis', 'IN'),
-            ('Buffalo', 'NY'),
-        ]
-        
-        for city in cities_data:
-            c.execute('INSERT OR IGNORE INTO cities (name, state) VALUES (?, ?)', city)
-    
+    # Load all CSV files from the schedules directory
+    print("📥 Loading schedules from CSV files...")
+    load_schedules_from_csv(c)
     conn.commit()
     conn.close()
+
+
+def reload_schedules():
+    """Force reload all schedules from CSV files (deletes and recreates database)."""
+    db_path = DATABASE_PATH
+    if os.path.exists(db_path):
+        os.remove(db_path)
+        print(f"🗑️  Deleted database: {db_path}")
+    init_database()
+    print("✓ Database reloaded with all CSV schedules")
+
+
+def load_schedules_from_csv(cursor):
+    """Load all CSV files from the schedules directory into the database."""
+    schedules_path = Path(SCHEDULES_DIR)
+    
+    if not schedules_path.exists():
+        print(f"Warning: Schedules directory not found at {SCHEDULES_DIR}")
+        return
+    
+    csv_files = sorted(schedules_path.glob('*.csv'))
+    
+    if not csv_files:
+        print(f"Warning: No CSV files found in {SCHEDULES_DIR}")
+        return
+    
+    route_number = 1
+    
+    for csv_file in csv_files:
+        try:
+            with open(csv_file, 'r', encoding='utf-8') as f:
+                reader = csv.reader(f)
+                
+                # Read first row to get route name
+                first_row = next(reader, None)
+                if not first_row or not first_row[0]:
+                    print(f"Warning: {csv_file.name} has no route name in cell A1")
+                    continue
+                
+                # Get route name from first column of first row (ignore any extra columns)
+                route_name = first_row[0].strip()
+                
+                # Read all stop rows
+                stops = []
+                for row in reader:
+                    if not row:  # Skip empty rows
+                        continue
+                    
+                    # Get city (first column) and time (second column)
+                    city = row[0].strip() if len(row) > 0 else None
+                    stop_time = row[1].strip() if len(row) > 1 else None
+                    
+                    # Only add if both city and time exist and are not empty
+                    if city and stop_time:
+                        # Normalize time format to HH:MM
+                        # Handle times like "1:07" or "0:03" by padding with zero
+                        time_parts = stop_time.split(':')
+                        if len(time_parts) == 2:
+                            try:
+                                hour = int(time_parts[0])
+                                minute = int(time_parts[1])
+                                stop_time = f"{hour:02d}:{minute:02d}"
+                            except (ValueError, IndexError):
+                                pass  # Keep original format if parsing fails
+                        
+                        # Extract just the city name if it has station info
+                        # For entries like "New York, NY – Moynihan Train Hall (NYP)", 
+                        # we want to extract just "New York"
+                        city_name = city.split(',')[0].strip()
+                        stops.append((city_name, stop_time))
+                
+                if not stops:
+                    print(f"Warning: {csv_file.name} has no valid stops")
+                    continue
+                
+                # Insert route
+                origin_city = stops[0][0]
+                destination_city = stops[-1][0]
+                departure_time = stops[0][1]
+                arrival_time = stops[-1][1]
+                
+                # Calculate duration (simple estimation)
+                duration_hours = 1  # Default, will be more sophisticated later
+                
+                cursor.execute('''INSERT INTO routes 
+                                 (route_number, route_name, origin_city, destination_city, 
+                                  departure_time, arrival_time, duration_hours)
+                                 VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                              (str(route_number), route_name, origin_city, destination_city,
+                               departure_time, arrival_time, duration_hours))
+                
+                route_id = cursor.lastrowid
+                
+                # Insert stops
+                for stop_number, (city, stop_time) in enumerate(stops, 1):
+                    cursor.execute('''INSERT INTO stops 
+                                     (route_id, stop_number, city_name, stop_time)
+                                     VALUES (?, ?, ?, ?)''',
+                                  (route_id, stop_number, city, stop_time))
+                    
+                    # Add city to cities table if not already there
+                    cursor.execute('INSERT OR IGNORE INTO cities (name) VALUES (?)', (city,))
+                
+                print(f"✓ Loaded route {route_number}: {route_name} from {csv_file.name} ({len(stops)} stops)")
+                route_number += 1
+        
+        except Exception as e:
+            print(f"Error loading {csv_file.name}: {e}")
+            import traceback
+            traceback.print_exc()
+            continue
 
 def get_all_cities():
     """Get all cities in the network."""
