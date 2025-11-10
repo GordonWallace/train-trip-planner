@@ -172,14 +172,18 @@ def get_all_cities():
     return cities
 
 def get_routes_between_cities(origin, destination):
-    """Get all routes between two cities."""
+    """Get all routes that pass through both origin and destination cities."""
     conn = sqlite3.connect(DATABASE_PATH)
     conn.row_factory = sqlite3.Row
     c = conn.cursor()
     
-    c.execute('''SELECT * FROM routes 
-                 WHERE origin_city = ? AND destination_city = ?
-                 ORDER BY departure_time''', (origin, destination))
+    # Find routes that have both cities as stops, with origin before destination
+    c.execute('''SELECT DISTINCT r.* FROM routes r
+                 INNER JOIN stops s1 ON r.id = s1.route_id
+                 INNER JOIN stops s2 ON r.id = s2.route_id
+                 WHERE s1.city_name = ? AND s2.city_name = ?
+                 AND s1.stop_number < s2.stop_number
+                 ORDER BY r.departure_time''', (origin, destination))
     routes = [dict(row) for row in c.fetchall()]
     conn.close()
     return routes
@@ -262,6 +266,36 @@ def get_stops_from_city(route_id, from_city):
     c.execute('''SELECT * FROM stops 
                  WHERE route_id = ? AND stop_number >= ?
                  ORDER BY stop_number''', (route_id, from_stop_number))
+    stops = [dict(row) for row in c.fetchall()]
+    conn.close()
+    return stops
+
+def get_stops_between_cities(route_id, from_city, to_city):
+    """Get stops from from_city to to_city (inclusive) on a specific route."""
+    conn = sqlite3.connect(DATABASE_PATH)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    
+    # Find the stop numbers for both cities
+    c.execute('''SELECT stop_number FROM stops 
+                 WHERE route_id = ? AND city_name = ?''', (route_id, from_city))
+    from_result = c.fetchone()
+    
+    c.execute('''SELECT stop_number FROM stops 
+                 WHERE route_id = ? AND city_name = ?''', (route_id, to_city))
+    to_result = c.fetchone()
+    
+    if not from_result or not to_result:
+        conn.close()
+        return []
+    
+    from_stop_number = from_result['stop_number']
+    to_stop_number = to_result['stop_number']
+    
+    # Get all stops between from and to (inclusive)
+    c.execute('''SELECT * FROM stops 
+                 WHERE route_id = ? AND stop_number >= ? AND stop_number <= ?
+                 ORDER BY stop_number''', (route_id, from_stop_number, to_stop_number))
     stops = [dict(row) for row in c.fetchall()]
     conn.close()
     return stops
