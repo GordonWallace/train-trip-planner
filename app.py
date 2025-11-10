@@ -70,7 +70,8 @@ def api_routes():
             else:
                 route['duration_hours'] = f"{total_hours} hour{'s' if total_hours != 1 else ''}"
             
-            # Update arrival time to reflect the actual destination
+            # Update departure and arrival times to reflect the actual origin/destination
+            route['departure_time'] = origin_time
             route['arrival_time'] = destination_time
     
     return jsonify({'routes': routes})
