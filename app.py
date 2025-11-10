@@ -222,12 +222,12 @@ def generate_schedule():
                     
                     # Only add duration row if actual duration > 0
                     if actual_duration_hours > 0:
-                        # Add duration row showing ACTUAL stop duration
+                        # Add duration row showing ACTUAL stop duration with START date (arrival date)
                         schedule.append({
                             'city': stop['city_name'],
                             'event': f'{actual_duration_hours} hour stop' if actual_duration_hours != 1 else '1 hour stop',
-                            'time': depart_time,
-                            'date': depart_date
+                            'time': stop_time.strftime('%H:%M'),
+                            'date': current_date.strftime('%Y-%m-%d')
                         })
                         
                         # Add a Board event for reboarding at actual departure time
