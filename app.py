@@ -148,6 +148,8 @@ def generate_schedule():
         # Build complete journey with stops between origin and destination
         i = start_idx
         prev_stop_time = None
+        current_date = trip_date
+        
         while i <= end_idx:
             stop = stops[i]
             
@@ -160,7 +162,6 @@ def generate_schedule():
             
             # Always add the origin stop
             if is_origin:
-                current_date = trip_date
                 schedule.append({
                     'city': stop['city_name'],
                     'event': 'Board',
@@ -171,27 +172,7 @@ def generate_schedule():
                 i += 1
                 continue
             
-            # For all other stops (intermediate and destination), add them to show the full route
-            # Detect day boundary: if current time is earlier than previous time, we've crossed midnight
-            if prev_stop_time is not None and stop_time < prev_stop_time:
-                current_date = current_date + timedelta(days=1)
-                print(f"  [DATE ADVANCE] {stop['city_name']}: {stop_time} < {prev_stop_time}, advancing to {current_date}")
-            
-            print(f"  Processing {stop['city_name']} at {stop_time} on {current_date}")
-            
-            # Determine the event type: Disembark if destination OR if this is a selected stop (getting off)
-            event_type = 'Disembark' if (is_destination or is_selected) else 'Stop'
-            
-            schedule.append({
-                'city': stop['city_name'],
-                'event': event_type,
-                'time': stop_time.strftime('%H:%M'),
-                'date': current_date.strftime('%Y-%m-%d')
-            })
-            # Update prev_stop_time for all stops to track date correctly
-            prev_stop_time = stop_time
-            
-            # If this is a selected stop with a duration, add a duration row and find next departure
+            # Handle selected intermediate stops with duration
             if is_selected and stop['city_name'] in stop_durations:
                 duration = stop_durations[stop['city_name']]
                 
@@ -237,13 +218,14 @@ def generate_schedule():
                             'time': depart_time,
                             'date': depart_date
                         })
-                    # Add all stops from this new segment until we reach the destination
-                    # Skip the first stop since it's the city we're departing from (already added above)
+                    
+                    # Add all stops from this new segment until we reach the destination or another selected stop
                     connecting_date = datetime.strptime(depart_date, '%Y-%m-%d').date()
-                    # Initialize prev_time to the departure city's time for proper date tracking
                     connecting_prev_time = datetime.strptime(connecting_stops[0]['stop_time'], '%H:%M').time() if connecting_stops else None
+                    
                     for next_stop in connecting_stops[1:]:  # Skip first stop (same as current city)
                         next_is_destination = next_stop['city_name'] == actual_destination
+                        next_is_selected = next_stop['city_name'] in stop_durations
                         next_time = datetime.strptime(next_stop['stop_time'], '%H:%M').time()
                         
                         # Track day changes within connecting stops
@@ -261,28 +243,30 @@ def generate_schedule():
                         
                         connecting_prev_time = next_time
                         
-                        # Stop adding once we reach actual destination
-                        if next_is_destination:
+                        # If we hit another selected stop or destination, break and continue main loop
+                        if next_is_destination or next_is_selected:
+                            current_date = connecting_date
                             break
+                    else:
+                        # If we didn't break (no selected stop or destination found), we've reached the end
+                        current_date = connecting_date
                     
-                    # After processing connecting stops, we've reached the destination
-                    # Calculate total duration from first to last event
-                    first_event = schedule[0]
-                    last_event = schedule[-1]
-                    start_dt = datetime.strptime(f"{first_event['date']} {first_event['time']}", '%Y-%m-%d %H:%M')
-                    end_dt = datetime.strptime(f"{last_event['date']} {last_event['time']}", '%Y-%m-%d %H:%M')
-                    total_duration = end_dt - start_dt
-                    hours = int(total_duration.total_seconds() // 3600)
-                    days = hours // 24
-                    hours = hours % 24
-                    duration_str = f"{days} days {hours} hours" if days > 0 else f"{hours} hours"
-                    
-                    # Return early to avoid adding more stops from the main route
-                    return jsonify({
-                        'schedule': schedule,
-                        'route_name': route['route_name'],
-                        'total_duration': duration_str
-                    })
+                    i += 1
+                    continue
+            
+            # Handle destination or non-selected stops
+            if not is_selected:
+                # Check if we need to update current_date for day boundaries
+                if prev_stop_time is not None and stop_time < prev_stop_time:
+                    current_date = current_date + timedelta(days=1)
+                
+                schedule.append({
+                    'city': stop['city_name'],
+                    'event': 'Disembark' if is_destination else 'Stop',
+                    'time': stop_time.strftime('%H:%M'),
+                    'date': current_date.strftime('%Y-%m-%d')
+                })
+                prev_stop_time = stop_time
             
             i += 1
         
