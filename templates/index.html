@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Train Trip Planner</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🚂 Train Trip Planner</h1>
+            <p>Plan your multi-day Amtrak adventure</p>
+        </header>
+
+        <main>
+            <!-- Trip Planning Section -->
+            <section class="planning-section">
+                <h2>Plan Your Trip</h2>
+                
+                <div class="form-group">
+                    <label for="origin">From:</label>
+                    <select id="origin" class="city-select">
+                        <option value="">Select origin city</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="destination">To:</label>
+                    <select id="destination" class="city-select">
+                        <option value="">Select destination city</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="startDate">Start Date:</label>
+                    <input type="date" id="startDate" required>
+                </div>
+
+                <button id="searchBtn" class="btn btn-primary">Search Routes</button>
+            </section>
+
+            <!-- Routes Section -->
+            <section id="routesSection" class="routes-section" style="display: none;">
+                <h2>Available Routes</h2>
+                <div id="routesList" class="routes-list"></div>
+            </section>
+
+            <!-- Stops Selection Section -->
+            <section id="stopsSection" class="stops-section" style="display: none;">
+                <h2>Select Your Stops</h2>
+                <p class="info-text">Choose which cities you'd like to stop at along your route:</p>
+                <div id="stopsList" class="stops-list"></div>
+                <button id="generateBtn" class="btn btn-success">Generate Schedule</button>
+                <button id="backBtn" class="btn btn-secondary">Back</button>
+            </section>
+
+            <!-- Schedule Section -->
+            <section id="scheduleSection" class="schedule-section" style="display: none;">
+                <h2 id="scheduleTitleRoute">Trip Schedule</h2>
+                <div id="scheduleContent" class="schedule-content">
+                    <table id="scheduleTable" class="schedule-table">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Time</th>
+                                <th>City</th>
+                                <th>Event</th>
+                            </tr>
+                        </thead>
+                        <tbody id="scheduleBody">
+                        </tbody>
+                    </table>
+                </div>
+                <div class="schedule-actions">
+                    <button id="newTripBtn" class="btn btn-primary">Plan New Trip</button>
+                    <button id="downloadBtn" class="btn btn-info">Download Schedule</button>
+                </div>
+            </section>
+
+            <!-- Loading Spinner -->
+            <div id="loadingSpinner" class="loading-spinner" style="display: none;">
+                <div class="spinner"></div>
+                <p>Loading...</p>
+            </div>
+        </main>
+
+        <footer>
+            <p>&copy; 2025 Train Trip Planner. Plan your journey across America by rail.</p>
+        </footer>
+    </div>
+
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
