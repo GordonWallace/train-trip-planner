@@ -300,6 +300,104 @@ def get_stops_between_cities(route_id, from_city, to_city):
     conn.close()
     return stops
 
+def find_connection_hubs(origin_city, destination_city):
+    """Find all cities that have routes to both origin and destination."""
+    conn = sqlite3.connect(DATABASE_PATH)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    
+    # Find routes from origin city
+    c.execute('''SELECT DISTINCT r1.id as route1_id, r1.route_name as route1_name
+                 FROM routes r1
+                 INNER JOIN stops s1 ON r1.id = s1.route_id
+                 WHERE s1.city_name = ?''', (origin_city,))
+    origin_routes = c.fetchall()
+    
+    hubs_with_connections = []
+    
+    for orig_route in origin_routes:
+        route1_id = orig_route['route1_id']
+        route1_name = orig_route['route1_name']
+        
+        # Get all cities on this route after origin
+        c.execute('''SELECT DISTINCT s.city_name, s.stop_number
+                     FROM stops s
+                     WHERE s.route_id = ?
+                     AND s.stop_number > (SELECT stop_number FROM stops WHERE route_id = ? AND city_name = ?)
+                     ORDER BY s.stop_number''', (route1_id, route1_id, origin_city))
+        stops_on_route1 = c.fetchall()
+        
+        for stop in stops_on_route1:
+            hub_city = stop['city_name']
+            
+            # Check if there's a route from this hub to destination
+            c.execute('''SELECT DISTINCT r2.id as route2_id, r2.route_name as route2_name
+                         FROM routes r2
+                         INNER JOIN stops s2 ON r2.id = s2.route_id
+                         INNER JOIN stops s3 ON r2.id = s3.route_id
+                         WHERE s2.city_name = ? AND s3.city_name = ?
+                         AND s2.stop_number < s3.stop_number''', (hub_city, destination_city))
+            dest_routes = c.fetchall()
+            
+            for dest_route in dest_routes:
+                hubs_with_connections.append({
+                    'hub': hub_city,
+                    'route1_id': route1_id,
+                    'route1_name': route1_name,
+                    'route2_id': dest_route['route2_id'],
+                    'route2_name': dest_route['route2_name']
+                })
+    
+    conn.close()
+    return hubs_with_connections
+
+def get_connection_route(origin_city, destination_city, hub_city, route1_id, route2_id):
+    """Get the combined route information for a connection through a hub."""
+    conn = sqlite3.connect(DATABASE_PATH)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    
+    # If hub_city not provided, determine it from route endpoints
+    if not hub_city:
+        # Route 1's destination should be the hub (where connection happens)
+        c.execute('SELECT destination_city FROM routes WHERE id = ?', (route1_id,))
+        result = c.fetchone()
+        if result:
+            hub_city = result['destination_city']
+    
+    # Get stops from origin to hub on route 1
+    c.execute('''SELECT * FROM stops
+                 WHERE route_id = ?
+                 AND stop_number >= (SELECT stop_number FROM stops WHERE route_id = ? AND city_name = ?)
+                 AND stop_number <= (SELECT stop_number FROM stops WHERE route_id = ? AND city_name = ?)
+                 ORDER BY stop_number''', (route1_id, route1_id, origin_city, route1_id, hub_city))
+    segment1_stops = [dict(row) for row in c.fetchall()]
+    
+    # Get stops from hub to destination on route 2
+    c.execute('''SELECT * FROM stops
+                 WHERE route_id = ?
+                 AND stop_number >= (SELECT stop_number FROM stops WHERE route_id = ? AND city_name = ?)
+                 AND stop_number <= (SELECT stop_number FROM stops WHERE route_id = ? AND city_name = ?)
+                 ORDER BY stop_number''', (route2_id, route2_id, hub_city, route2_id, destination_city))
+    segment2_stops = [dict(row) for row in c.fetchall()]
+    
+    # Get route details
+    c.execute('SELECT * FROM routes WHERE id = ?', (route1_id,))
+    route1 = dict(c.fetchone())
+    
+    c.execute('SELECT * FROM routes WHERE id = ?', (route2_id,))
+    route2 = dict(c.fetchone())
+    
+    conn.close()
+    
+    return {
+        'segment1_stops': segment1_stops,
+        'segment2_stops': segment2_stops,
+        'route1': route1,
+        'route2': route2,
+        'hub': hub_city
+    }
+
 if __name__ == '__main__':
     init_database()
     print("Database initialized successfully!")

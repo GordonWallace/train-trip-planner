@@ -236,6 +236,28 @@ section h2 {
     font-size: 1.1em;
 }
 
+.connection-info {
+    background: #e3f2fd;
+    border-left: 4px solid #ffc600;
+    padding: 8px 12px;
+    margin-bottom: 10px;
+    border-radius: 2px;
+}
+
+.connection-badge {
+    color: #003d82;
+    font-weight: 600;
+    font-size: 0.9em;
+}
+
+.route-card.connection-route {
+    border: 2px solid #ffc600;
+}
+
+.route-card.connection-route::before {
+    background: #ffc600;
+}
+
 .route-info {
     font-size: 0.9em;
     color: #555;
@@ -296,6 +318,16 @@ section h2 {
 .stop-item.checked {
     border-color: #0e7c0f;
     background-color: #f1f8f4;
+}
+
+.segment-header {
+    background: linear-gradient(to right, #003d82, #1565a0);
+    color: white;
+    padding: 12px 15px;
+    font-size: 0.95em;
+    margin-top: 15px;
+    margin-bottom: 10px;
+    border-left: 4px solid #ffc600;
 }
 
 .stop-checkbox-container {

@@ -20,7 +20,7 @@ def api_cities():
 
 @app.route('/api/routes', methods=['POST'])
 def api_routes():
-    """Get routes between two cities."""
+    """Get routes between two cities, including connecting routes."""
     data = request.json
     origin = data.get('origin')
     destination = data.get('destination')
@@ -28,10 +28,12 @@ def api_routes():
     if not origin or not destination:
         return jsonify({'error': 'Origin and destination required'}), 400
     
-    routes = get_routes_between_cities(origin, destination)
+    all_routes = []
     
-    # Calculate actual duration and arrival time for each route accounting for date boundaries
-    for route in routes:
+    # First, try to find direct routes
+    direct_routes = get_routes_between_cities(origin, destination)
+    
+    for route in direct_routes:
         # Get all stops for this route to find the actual origin and destination times
         all_stops = get_intermediate_stops(route['id'])
         
@@ -52,12 +54,11 @@ def api_routes():
             
             # If destination time is earlier than origin time, it's the next day
             if dest_dt < origin_dt:
-                # Add 24 hours to destination to account for day rollover
                 dest_dt = dest_dt + timedelta(days=1)
             
             duration = dest_dt - origin_dt
             total_seconds = duration.total_seconds()
-            total_hours = round(total_seconds / 3600)  # Round to nearest hour
+            total_hours = round(total_seconds / 3600)
             days = total_hours // 24
             remaining_hours = total_hours % 24
             
@@ -73,8 +74,73 @@ def api_routes():
             # Update departure and arrival times to reflect the actual origin/destination
             route['departure_time'] = origin_time
             route['arrival_time'] = destination_time
+            route['is_connection'] = False
+            all_routes.append(route)
     
-    return jsonify({'routes': routes})
+    # If no direct routes, try to find connecting routes
+    if not all_routes:
+        from database import find_connection_hubs, get_connection_route
+        
+        connections = find_connection_hubs(origin, destination)
+        
+        for conn_info in connections:
+            connection_route = get_connection_route(
+                origin, 
+                destination, 
+                conn_info['hub'],
+                conn_info['route1_id'],
+                conn_info['route2_id']
+            )
+            
+            seg1_stops = connection_route['segment1_stops']
+            seg2_stops = connection_route['segment2_stops']
+            
+            # Get times
+            origin_time = seg1_stops[0]['stop_time'] if seg1_stops else None
+            hub_arrival_time = seg1_stops[-1]['stop_time'] if seg1_stops else None
+            hub_departure_time = seg2_stops[0]['stop_time'] if seg2_stops else None
+            destination_time = seg2_stops[-1]['stop_time'] if seg2_stops else None
+            
+            if origin_time and destination_time:
+                # Calculate duration (simple: just use times, assuming connection is next day if needed)
+                origin_dt = datetime.strptime(origin_time, '%H:%M')
+                dest_dt = datetime.strptime(destination_time, '%H:%M')
+                
+                # Need to account for day boundary - approximate as 1-2 days for connections
+                if dest_dt < origin_dt:
+                    dest_dt = dest_dt + timedelta(days=1)
+                
+                duration = dest_dt - origin_dt
+                total_seconds = duration.total_seconds()
+                total_hours = round(total_seconds / 3600)
+                days = total_hours // 24
+                remaining_hours = total_hours % 24
+                
+                # Format the duration string
+                if days > 0:
+                    if remaining_hours > 0:
+                        duration_str = f"{days} day{'s' if days > 1 else ''} {remaining_hours} hour{'s' if remaining_hours != 1 else ''}"
+                    else:
+                        duration_str = f"{days} day{'s' if days > 1 else ''}"
+                else:
+                    duration_str = f"{total_hours} hour{'s' if total_hours != 1 else ''}"
+                
+                route_info = {
+                    'id': f"conn_{connection_route['route1']['id']}_{connection_route['route2']['id']}",
+                    'route_name': f"{connection_route['route1']['route_name']} → {connection_route['route2']['route_name']}",
+                    'origin_city': origin,
+                    'destination_city': destination,
+                    'departure_time': origin_time,
+                    'arrival_time': destination_time,
+                    'duration_hours': duration_str,
+                    'is_connection': True,
+                    'connection_hub': conn_info['hub'],
+                    'route1_id': connection_route['route1']['id'],
+                    'route2_id': connection_route['route2']['id']
+                }
+                all_routes.append(route_info)
+    
+    return jsonify({'routes': all_routes})
 
 @app.route('/api/stops/<int:route_id>', methods=['GET'])
 def api_stops(route_id):
@@ -96,6 +162,139 @@ def generate_schedule():
         return jsonify({'error': 'Route ID and start date required'}), 400
     
     try:
+        # Check if this is a connection route
+        is_connection = isinstance(route_id, str) and route_id.startswith('conn_')
+        
+        if is_connection:
+            # Parse connection route ID (format: conn_route1_id_route2_id)
+            parts = route_id.split('_')
+            route1_id = int(parts[1])
+            route2_id = int(parts[2])
+            
+            from database import get_connection_route
+            
+            # Get connection info
+            connection_data = get_connection_route(origin_city, destination_city, None, route1_id, route2_id)
+            # For now, we'll process segment 1 first, then segment 2
+            # This is a simplified version - a full implementation would blend the schedules
+            
+            route_name = f"{connection_data['route1']['route_name']} → {connection_data['route2']['route_name']}"
+            
+            # Generate schedule for segment 1
+            stops1 = connection_data['segment1_stops']
+            
+            # Generate schedule for segment 2  
+            stops2 = connection_data['segment2_stops']
+            
+            schedule = []
+            current_date = datetime.strptime(start_date, '%Y-%m-%d').date()
+            prev_stop_time = None
+            
+            # Add segment 1 stops
+            for i, stop in enumerate(stops1):
+                if not stop.get('stop_time'):
+                    continue  # Skip stops with no time data
+                    
+                stop_time = datetime.strptime(stop['stop_time'], '%H:%M').time()
+                is_origin = i == 0
+                is_hub = i == len(stops1) - 1
+                
+                if prev_stop_time is not None and stop_time < prev_stop_time:
+                    current_date = current_date + timedelta(days=1)
+                
+                schedule.append({
+                    'city': stop['city_name'],
+                    'event': 'Board' if is_origin else 'Disembark' if is_hub else 'Stop',
+                    'time': stop_time.strftime('%H:%M'),
+                    'date': current_date.strftime('%Y-%m-%d'),
+                    'route_name': connection_data['route1']['route_name']
+                })
+                
+                prev_stop_time = stop_time
+            
+            # Add layover info at hub
+            hub_departure_dt = None
+            hub_departure_time = None
+            
+            if prev_stop_time and stops2 and stops2[0].get('stop_time'):
+                hub_arrival_dt = datetime.combine(current_date, prev_stop_time)
+                
+                # Get hub departure time from segment 2
+                hub_departure_time = datetime.strptime(stops2[0]['stop_time'], '%H:%M').time()
+                hub_departure_dt = datetime.combine(current_date, hub_departure_time)
+                
+                # If departure is earlier than arrival, it's the next day
+                if hub_departure_dt < hub_arrival_dt:
+                    hub_departure_dt = hub_departure_dt + timedelta(days=1)
+                
+                layover_minutes = int((hub_departure_dt - hub_arrival_dt).total_seconds() / 60)
+                schedule.append({
+                    'city': connection_data['segment1_stops'][-1]['city_name'],
+                    'event': f'{layover_minutes // 60} hour layover',
+                    'time': hub_departure_time.strftime('%H:%M'),
+                    'date': hub_departure_dt.strftime('%Y-%m-%d'),
+                    'route_name': f"Connecting to {connection_data['route2']['route_name']}"
+                })
+                
+                current_date = hub_departure_dt.date()
+                prev_stop_time = hub_departure_time
+            else:
+                # If we can't calculate layover, just get the departure time
+                if stops2 and stops2[0].get('stop_time'):
+                    hub_departure_time = datetime.strptime(stops2[0]['stop_time'], '%H:%M').time()
+                    hub_departure_dt = datetime.combine(current_date, hub_departure_time)
+                    prev_stop_time = hub_departure_time
+                else:
+                    # No valid departure time available
+                    prev_stop_time = None
+            
+            # Add segment 2 stops (skip first since it's the hub, already added)
+            if hub_departure_dt:
+                current_date = hub_departure_dt.date()
+            else:
+                current_date = datetime.strptime(start_date, '%Y-%m-%d').date()
+            
+            for i, stop in enumerate(stops2[1:], 1):
+                if not stop.get('stop_time'):
+                    continue  # Skip stops with no time data
+                    
+                stop_time = datetime.strptime(stop['stop_time'], '%H:%M').time()
+                is_destination = i == len(stops2) - 1
+                
+                if prev_stop_time is not None and stop_time < prev_stop_time:
+                    current_date = current_date + timedelta(days=1)
+                
+                schedule.append({
+                    'city': stop['city_name'],
+                    'event': 'Disembark' if is_destination else 'Stop',
+                    'time': stop_time.strftime('%H:%M'),
+                    'date': current_date.strftime('%Y-%m-%d'),
+                    'route_name': connection_data['route2']['route_name']
+                })
+                
+                prev_stop_time = stop_time
+            
+            # Calculate total duration
+            if schedule:
+                first_event = schedule[0]
+                last_event = schedule[-1]
+                start_dt = datetime.strptime(f"{first_event['date']} {first_event['time']}", '%Y-%m-%d %H:%M')
+                end_dt = datetime.strptime(f"{last_event['date']} {last_event['time']}", '%Y-%m-%d %H:%M')
+                total_duration = end_dt - start_dt
+                hours = int(total_duration.total_seconds() // 3600)
+                days = hours // 24
+                hours = hours % 24
+                duration_str = f"{days} days {hours} hours" if days > 0 else f"{hours} hours"
+            else:
+                duration_str = "Unknown"
+            
+            return jsonify({
+                'schedule': schedule,
+                'route_name': route_name,
+                'total_duration': duration_str
+            })
+        
+        # Handle regular (non-connection) routes
         route = get_route_by_id(route_id)
         if not route:
             return jsonify({'error': 'Route not found'}), 404
@@ -113,12 +312,6 @@ def generate_schedule():
         # Use provided origin/destination, or fall back to route defaults
         actual_origin = origin_city if origin_city else route['origin_city']
         actual_destination = destination_city if destination_city else route['destination_city']
-        
-        print(f"\n[DEBUG] generate_schedule called")
-        print(f"  Route: {route['route_name']} (ID: {route_id})")
-        print(f"  Actual origin: {actual_origin}")
-        print(f"  Actual destination: {actual_destination}")
-        print(f"  Stop durations: {stop_durations}")
         
         # Parse the start date
         trip_date = datetime.strptime(start_date, '%Y-%m-%d')
@@ -142,17 +335,24 @@ def generate_schedule():
         if start_idx is None or end_idx is None or start_idx >= end_idx:
             return jsonify({'error': f'Cannot find route from {actual_origin} to {actual_destination}'}), 400
         
-        print(f"  Start index: {start_idx} ({stops[start_idx]['city_name']})")
-        print(f"  End index: {end_idx} ({stops[end_idx]['city_name']})")
-        print(f"  Stops to process: {[s['city_name'] for s in stops[start_idx:end_idx+1]]}")
-        
         # Build complete journey with stops between origin and destination
         i = start_idx
         prev_stop_time = None
         current_date = trip_date
+        consumed_cities = set()  # Track cities already added to schedule
         
         while i <= end_idx:
             stop = stops[i]
+            
+            # Skip cities that were already added from a connecting segment
+            if stop['city_name'] in consumed_cities:
+                i += 1
+                continue
+            
+            # Skip stops with no time data
+            if not stop.get('stop_time'):
+                i += 1
+                continue
             
             # Check if this is a selected stop or the destination
             is_selected = stop['city_name'] in stop_durations
@@ -169,6 +369,7 @@ def generate_schedule():
                     'time': stop_time.strftime('%H:%M'),
                     'date': current_date.strftime('%Y-%m-%d')
                 })
+                consumed_cities.add(stop['city_name'])
                 prev_stop_time = stop_time
                 i += 1
                 continue
@@ -181,19 +382,12 @@ def generate_schedule():
                 stop_dt = datetime.combine(current_date, stop_time)
                 desired_departure_dt = stop_dt + timedelta(hours=duration)
                 
-                print(f"\n[DEBUG] Stop at {stop['city_name']}")
-                print(f"  Stop time: {stop_dt}")
-                print(f"  Stop duration: {duration} hours")
-                print(f"  Desired departure: {desired_departure_dt}")
-                
                 # Find next available train departing from this city at or after desired time
                 next_available_departure = find_next_departure(
                     stop['city_name'],
                     desired_departure_dt,
                     actual_destination
                 )
-                
-                print(f"  Next departure found: {next_available_departure}")
                 
                 if next_available_departure:
                     depart_time, depart_date, connecting_stops = next_available_departure
@@ -222,9 +416,16 @@ def generate_schedule():
                     
                     # Add all stops from this new segment until we reach the destination or another selected stop
                     connecting_date = datetime.strptime(depart_date, '%Y-%m-%d').date()
-                    connecting_prev_time = datetime.strptime(connecting_stops[0]['stop_time'], '%H:%M').time() if connecting_stops else None
+                    connecting_prev_time = None
+                    
+                    # Get first stop's time if it exists
+                    if connecting_stops and connecting_stops[0].get('stop_time'):
+                        connecting_prev_time = datetime.strptime(connecting_stops[0]['stop_time'], '%H:%M').time()
                     
                     for next_stop in connecting_stops[1:]:  # Skip first stop (same as current city)
+                        if not next_stop.get('stop_time'):
+                            continue  # Skip stops with no time data
+                            
                         next_is_destination = next_stop['city_name'] == actual_destination
                         next_is_selected = next_stop['city_name'] in stop_durations
                         next_time = datetime.strptime(next_stop['stop_time'], '%H:%M').time()
@@ -235,23 +436,30 @@ def generate_schedule():
                         
                         next_dt = datetime.combine(connecting_date, next_time)
                         
-                        schedule.append({
-                            'city': next_stop['city_name'],
-                            'event': 'Disembark' if next_is_destination else 'Stop',
-                            'time': next_time.strftime('%H:%M'),
-                            'date': next_dt.strftime('%Y-%m-%d')
-                        })
+                        # Only add the stop if it's not a selected stop that will be processed later
+                        if next_is_selected and not next_is_destination:
+                            # Mark it as consumed so we skip it in main loop
+                            consumed_cities.add(next_stop['city_name'])
+                            # Don't add to schedule - let main loop process it
+                        else:
+                            # Add non-selected stops and the destination
+                            schedule.append({
+                                'city': next_stop['city_name'],
+                                'event': 'Disembark' if next_is_destination else 'Stop',
+                                'time': next_time.strftime('%H:%M'),
+                                'date': next_dt.strftime('%Y-%m-%d')
+                            })
+                            consumed_cities.add(next_stop['city_name'])
                         
                         connecting_prev_time = next_time
                         
-                        # If we hit another selected stop or destination, break and continue main loop
+                        # If we hit the destination or a selected stop, stop adding
                         if next_is_destination or next_is_selected:
-                            current_date = connecting_date
                             break
-                    else:
-                        # If we didn't break (no selected stop or destination found), we've reached the end
-                        current_date = connecting_date
                     
+                    # Update current_date for next iteration
+                    current_date = connecting_date
+                    consumed_cities.add(stop['city_name'])
                     i += 1
                     continue
             
@@ -267,6 +475,7 @@ def generate_schedule():
                     'time': stop_time.strftime('%H:%M'),
                     'date': current_date.strftime('%Y-%m-%d')
                 })
+                consumed_cities.add(stop['city_name'])
                 prev_stop_time = stop_time
             
             i += 1
