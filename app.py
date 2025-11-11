@@ -180,6 +180,16 @@ def generate_schedule():
             
             route_name = f"{connection_data['route1']['route_name']} → {connection_data['route2']['route_name']}"
             
+            # Parse stop durations (for hub stop layovers)
+            stop_durations = {}
+            if selected_stops and isinstance(selected_stops[0], dict):
+                for stop_data in selected_stops:
+                    stop_durations[stop_data['city']] = stop_data.get('duration', 0)
+            else:
+                # Old format: just city names
+                for stop_city in selected_stops:
+                    stop_durations[stop_city] = 0
+            
             # Generate schedule for segment 1
             stops1 = connection_data['segment1_stops']
             
@@ -215,23 +225,46 @@ def generate_schedule():
             # Add layover info at hub
             hub_departure_dt = None
             hub_departure_time = None
+            hub_city = connection_data['segment1_stops'][-1]['city_name']
             
             if prev_stop_time and stops2 and stops2[0].get('stop_time'):
                 hub_arrival_dt = datetime.combine(current_date, prev_stop_time)
                 
-                # Get hub departure time from segment 2
-                hub_departure_time = datetime.strptime(stops2[0]['stop_time'], '%H:%M').time()
-                hub_departure_dt = datetime.combine(current_date, hub_departure_time)
+                # Get the next train's departure time from segment 2
+                next_train_departure_time = datetime.strptime(stops2[0]['stop_time'], '%H:%M').time()
+                next_train_departure_dt = datetime.combine(current_date, next_train_departure_time)
                 
-                # If departure is earlier than arrival, it's the next day
-                if hub_departure_dt < hub_arrival_dt:
-                    hub_departure_dt = hub_departure_dt + timedelta(days=1)
+                # If this departure is earlier than arrival, it's the next day
+                if next_train_departure_dt < hub_arrival_dt:
+                    next_train_departure_dt = next_train_departure_dt + timedelta(days=1)
+                
+                # Default: depart on the next available train
+                hub_departure_dt = next_train_departure_dt
+                
+                # Check if user wants to stop at the hub for additional time
+                if hub_city in stop_durations:
+                    user_requested_duration = stop_durations[hub_city]
+                    if user_requested_duration > 0:
+                        # User wants to stay longer at the hub
+                        desired_earliest_departure = hub_arrival_dt + timedelta(hours=user_requested_duration)
+                        
+                        # Check if next train departs after user's desired departure time
+                        if next_train_departure_dt >= desired_earliest_departure:
+                            # Take the next train (it departs after user wants to leave anyway)
+                            hub_departure_dt = next_train_departure_dt
+                        else:
+                            # Next train is too early, so check the train the next day
+                            # (assume same time the next day for this simple logic)
+                            hub_departure_dt = next_train_departure_dt + timedelta(days=1)
+                            # If that's still before desired departure, push to desired time
+                            if hub_departure_dt < desired_earliest_departure:
+                                hub_departure_dt = desired_earliest_departure
                 
                 layover_minutes = int((hub_departure_dt - hub_arrival_dt).total_seconds() / 60)
                 schedule.append({
-                    'city': connection_data['segment1_stops'][-1]['city_name'],
+                    'city': hub_city,
                     'event': f'{layover_minutes // 60} hour layover',
-                    'time': hub_departure_time.strftime('%H:%M'),
+                    'time': hub_departure_dt.time().strftime('%H:%M'),
                     'date': hub_departure_dt.strftime('%Y-%m-%d'),
                     'route_name': f"Connecting to {connection_data['route2']['route_name']}"
                 })

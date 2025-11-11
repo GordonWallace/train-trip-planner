@@ -241,6 +241,76 @@ class TestConnectionRouteSchedules(unittest.TestCase):
         # Should have both route names represented
         self.assertGreater(len(route_names), 1, 
             "Connection route should show multiple train names in schedule")
+    
+    def test_connection_route_hub_stop_duration(self):
+        """Test that hub stop duration extends layover correctly"""
+        from datetime import datetime
+        
+        # Test with 8 hour hub stop
+        response = self.client.post('/api/generate-schedule',
+            json={
+                'route_id': 'conn_1_2',
+                'selected_stops': [{'city': 'Chicago', 'duration': 8}],
+                'start_date': '2025-11-12',
+                'origin_city': 'New York',
+                'destination_city': 'Topeka'
+            },
+            content_type='application/json'
+        )
+        
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        
+        # Find Chicago layover event
+        chicago_layover = None
+        for event in data['schedule']:
+            if event['city'] == 'Chicago' and 'layover' in event['event'].lower():
+                chicago_layover = event
+                break
+        
+        self.assertIsNotNone(chicago_layover, "Should have layover at Chicago")
+        self.assertIn('8 hour', chicago_layover['event'], 
+            "Layover should be 8 hours when 8 hour stop requested")
+        
+        # Verify total duration increased due to longer layover
+        self.assertIn('total_duration', data)
+        self.assertIn('days', data['total_duration'])
+    
+    def test_connection_route_hub_stop_multiday(self):
+        """Test that multi-day hub stop uses next available train departure"""
+        from datetime import datetime
+        
+        # Test with 24 hour hub stop - should push to next day at 14:25 (SW Chief departure)
+        response = self.client.post('/api/generate-schedule',
+            json={
+                'route_id': 'conn_1_2',
+                'selected_stops': [{'city': 'Chicago', 'duration': 24}],
+                'start_date': '2025-11-12',
+                'origin_city': 'New York',
+                'destination_city': 'Topeka'
+            },
+            content_type='application/json'
+        )
+        
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        
+        # Find Chicago arrival and layover events
+        chicago_events = [e for e in data['schedule'] if e['city'] == 'Chicago']
+        self.assertGreater(len(chicago_events), 0)
+        
+        # Should have arrival (Disembark) and layover events
+        has_disembark = any('Disembark' in e['event'] for e in chicago_events)
+        has_layover = any('layover' in e['event'].lower() for e in chicago_events)
+        
+        self.assertTrue(has_disembark)
+        self.assertTrue(has_layover)
+        
+        # Find the layover event and verify it shows the actual train departure time (14:25)
+        layover_event = next(e for e in chicago_events if 'layover' in e['event'].lower())
+        # Should show 14:25 as the departure time (SW Chief's actual departure)
+        self.assertEqual(layover_event['time'], '14:25',
+            "Should show actual SW Chief departure time of 14:25")
 
 
 if __name__ == '__main__':

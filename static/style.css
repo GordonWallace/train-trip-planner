@@ -275,11 +275,11 @@ section h2 {
 
 /* Stops List */
 .stops-list {
-    background: #f5f8fb;
+    background: white;
     padding: 20px;
     border-radius: 0;
     margin-bottom: 20px;
-    border-left: 4px solid #1565a0;
+    border-left: 4px solid #e0e0e0;
 }
 
 .stop-item {
@@ -299,12 +299,21 @@ section h2 {
     background-color: #f5f8fb;
 }
 
+.route2-stop:hover {
+    border-color: #c85a2c;
+    background-color: #fef9f6;
+}
+
 .stop-item input[type="checkbox"] {
     width: 18px;
     height: 18px;
     margin-right: 12px;
     cursor: pointer;
     accent-color: #1565a0;
+}
+
+.route2-stop input[type="checkbox"] {
+    accent-color: #c85a2c;
 }
 
 .stop-item label {
@@ -328,6 +337,35 @@ section h2 {
     margin-top: 15px;
     margin-bottom: 10px;
     border-left: 4px solid #ffc600;
+}
+
+.route1-header {
+    background: linear-gradient(to right, #003d82, #1565a0);
+}
+
+.route2-header {
+    background: linear-gradient(to right, #8b4513, #c85a2c);
+}
+
+.hub-departure-info {
+    background-color: #fef6f1;
+    border-left: 3px solid #c85a2c;
+    padding: 12px;
+    margin: 8px 0;
+}
+
+.hub-departure-info .stop-checkbox-container {
+    padding: 0;
+}
+
+.route1-stop {
+    background-color: #f8fbfd;
+    border-left: 3px solid #1565a0;
+}
+
+.route2-stop {
+    background-color: #fef6f1;
+    border-left: 3px solid #c85a2c;
 }
 
 .stop-checkbox-container {
@@ -504,5 +542,17 @@ button:focus {
 .duration-row td {
     padding: 10px;
     border: 1px solid #ffd699;
+    border-left: 4px solid #ffc600;
+}
+
+.segment-header-row {
+    background: linear-gradient(to right, #003d82, #1565a0);
+    color: white;
+}
+
+.segment-header-row td {
+    padding: 12px 15px;
+    font-weight: bold;
+    border: none;
     border-left: 4px solid #ffc600;
 }

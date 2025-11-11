@@ -268,18 +268,23 @@ function displayStops(stops, route, searchOrigin, searchDestination) {
 // Display stops for connection routes (two segments)
 function displayConnectionStops(stops1, stops2, route, searchOrigin, searchDestination) {
     const stopsList = document.getElementById('stopsList');
-    stopsList.innerHTML = `
-        <div class="stop-item checked">
-            <input type="checkbox" id="stop-origin" checked disabled data-city="${searchOrigin}">
-            <label for="stop-origin">${searchOrigin} - <strong>Origin (Departure: ${route.departure_time})</strong></label>
-        </div>
-    `;
+    stopsList.innerHTML = '';
     
-    // Add a header for the first route segment
+    // Add a header for the first route segment at the very beginning
     const header1 = document.createElement('div');
-    header1.className = 'segment-header';
+    header1.className = 'segment-header route1-header';
     header1.innerHTML = `<strong>🚆 ${route.route_name.split(' → ')[0]}</strong>`;
     stopsList.appendChild(header1);
+    
+    // Add origin stop (no checkbox, just like hub departure info)
+    const originItem = document.createElement('div');
+    originItem.className = 'stop-item route1-stop';
+    originItem.innerHTML = `
+        <div class="stop-checkbox-container">
+            <label>${searchOrigin} - <strong>Origin (Departure: ${route.departure_time})</strong></label>
+        </div>
+    `;
+    stopsList.appendChild(originItem);
     
     // Find indices for first route
     let originIndex = -1;
@@ -294,18 +299,18 @@ function displayConnectionStops(stops1, stops2, route, searchOrigin, searchDesti
         }
     });
     
-    // Display stops from origin to hub on first route
+    // Display stops from origin to hub on first route (skip the origin since we already rendered it)
     for (let i = originIndex + 1; i <= hubIndex && i < stops1.length; i++) {
         const stop = stops1[i];
         const stopItem = document.createElement('div');
-        stopItem.className = 'stop-item';
+        stopItem.className = 'stop-item route1-stop';
         const stopId = `stop1-${stop.id}`;
         
         const isHub = stop.city_name === route.connection_hub;
         
         stopItem.innerHTML = `
             <div class="stop-checkbox-container">
-                <input type="checkbox" id="${stopId}" data-city="${stop.city_name}" ${isHub ? 'disabled' : ''}>
+                <input type="checkbox" id="${stopId}" data-city="${stop.city_name}">
                 <label for="${stopId}">${stop.city_name}${isHub ? ' - <strong>Connection Hub</strong>' : ''} - Arrival: ${stop.stop_time}</label>
             </div>
             <div class="stop-duration-container" id="duration-${stopId}" style="display: none;">
@@ -314,29 +319,46 @@ function displayConnectionStops(stops1, stops2, route, searchOrigin, searchDesti
             </div>
         `;
         
-        if (!isHub) {
-            const checkbox = stopItem.querySelector('input[type="checkbox"]');
-            const durationContainer = stopItem.querySelector(`#duration-${stopId}`);
-            
-            checkbox.addEventListener('change', function() {
-                if (this.checked) {
-                    stopItem.classList.add('checked');
-                    durationContainer.style.display = 'flex';
-                } else {
-                    stopItem.classList.remove('checked');
-                    durationContainer.style.display = 'none';
-                }
-            });
-        }
+        const checkbox = stopItem.querySelector('input[type="checkbox"]');
+        const durationContainer = stopItem.querySelector(`#duration-${stopId}`);
+        
+        checkbox.addEventListener('change', function() {
+            if (this.checked) {
+                stopItem.classList.add('checked');
+                if (durationContainer) durationContainer.style.display = 'flex';
+            } else {
+                stopItem.classList.remove('checked');
+                if (durationContainer) durationContainer.style.display = 'none';
+            }
+        });
         
         stopsList.appendChild(stopItem);
     }
     
     // Add a header for the second route segment
     const header2 = document.createElement('div');
-    header2.className = 'segment-header';
+    header2.className = 'segment-header route2-header';
     header2.innerHTML = `<strong>🚆 ${route.route_name.split(' → ')[1]}</strong>`;
     stopsList.appendChild(header2);
+    
+    // Add connection hub departure info from second route (after header2)
+    const hubDepartureInfo = document.createElement('div');
+    hubDepartureInfo.className = 'stop-item hub-departure-info';
+    
+    // Find the departure time from the hub on route 2
+    let hubDepartureTime = null;
+    stops2.forEach((stop) => {
+        if (stop.city_name === route.connection_hub && !hubDepartureTime) {
+            hubDepartureTime = stop.stop_time;
+        }
+    });
+    
+    hubDepartureInfo.innerHTML = `
+        <div class="stop-checkbox-container">
+            <label>${route.connection_hub} - <strong>Departure: ${hubDepartureTime}</strong></label>
+        </div>
+    `;
+    stopsList.appendChild(hubDepartureInfo);
     
     // Find indices for second route
     let hubIndex2 = -1;
@@ -355,7 +377,7 @@ function displayConnectionStops(stops1, stops2, route, searchOrigin, searchDesti
     for (let i = hubIndex2 + 1; i < destIndex2 && i < stops2.length; i++) {
         const stop = stops2[i];
         const stopItem = document.createElement('div');
-        stopItem.className = 'stop-item';
+        stopItem.className = 'stop-item route2-stop';
         const stopId = `stop2-${stop.id}`;
         
         stopItem.innerHTML = `
@@ -385,13 +407,12 @@ function displayConnectionStops(stops1, stops2, route, searchOrigin, searchDesti
         stopsList.appendChild(stopItem);
     }
     
-    // Add destination
+    // Add destination (no checkbox, just like hub departure info)
     const destItem = document.createElement('div');
-    destItem.className = 'stop-item checked';
+    destItem.className = 'stop-item route2-stop';
     destItem.innerHTML = `
         <div class="stop-checkbox-container">
-            <input type="checkbox" id="stop-dest" checked disabled data-city="${searchDestination}">
-            <label for="stop-dest">${searchDestination} - <strong>Destination (Arrival: ${route.arrival_time})</strong></label>
+            <label>${searchDestination} - <strong>Destination (Arrival: ${route.arrival_time})</strong></label>
         </div>
     `;
     stopsList.appendChild(destItem);
@@ -401,9 +422,8 @@ function displayConnectionStops(stops1, stops2, route, searchOrigin, searchDesti
 async function generateSchedule() {
     const selectedStopsData = [];
     
-    // Get the origin from the disabled origin checkbox
-    const originCheckbox = document.getElementById('stop-origin');
-    const originCity = originCheckbox ? originCheckbox.getAttribute('data-city') : currentRoute.origin_city;
+    // Get origin from global variable
+    const originCity = searchOrigin;
     
     // Get all checked intermediate stops with their durations (excluding disabled checkboxes)
     document.querySelectorAll('.stop-item input[type="checkbox"]:checked:not(:disabled)').forEach(checkbox => {
@@ -421,9 +441,8 @@ async function generateSchedule() {
         }
     });
     
-    // Get the destination from the disabled destination checkbox
-    const destCheckbox = document.getElementById('stop-dest');
-    const destinationCity = destCheckbox ? destCheckbox.getAttribute('data-city') : currentRoute.destination_city;
+    // Get destination from global variable
+    const destinationCity = searchDestination;
     
     const startDate = document.getElementById('startDate').value;
     
@@ -475,11 +494,25 @@ function displaySchedule(data) {
     const scheduleBody = document.getElementById('scheduleBody');
     scheduleBody.innerHTML = '';
     
+    let lastRouteName = null;
+    
     data.schedule.forEach((event) => {
+        // Add segment header if route changes
+        const currentRouteName = event.route_name;
+        if (lastRouteName !== null && lastRouteName !== currentRouteName && !currentRouteName.includes('Connecting')) {
+            const headerRow = document.createElement('tr');
+            headerRow.className = 'segment-header-row';
+            headerRow.innerHTML = `
+                <td colspan="4"><strong>🚆 ${currentRouteName}</strong></td>
+            `;
+            scheduleBody.appendChild(headerRow);
+        }
+        lastRouteName = currentRouteName;
+        
         const row = document.createElement('tr');
         
-        // Check if this is a stop duration row
-        if (event.event.includes('hour stop')) {
+        // Check if this is a stop duration row or layover row
+        if (event.event.includes('hour stop') || event.event.includes('layover')) {
             row.className = 'duration-row';
         }
         
