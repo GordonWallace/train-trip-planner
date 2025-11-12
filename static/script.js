@@ -422,8 +422,9 @@ function displayConnectionStops(stops1, stops2, route, searchOrigin, searchDesti
 async function generateSchedule() {
     const selectedStopsData = [];
     
-    // Get origin from global variable
-    const originCity = searchOrigin;
+    // Get origin and destination from form inputs
+    const originCity = document.getElementById('origin').value;
+    const destinationCity = document.getElementById('destination').value;
     
     // Get all checked intermediate stops with their durations (excluding disabled checkboxes)
     document.querySelectorAll('.stop-item input[type="checkbox"]:checked:not(:disabled)').forEach(checkbox => {
@@ -440,9 +441,6 @@ async function generateSchedule() {
             });
         }
     });
-    
-    // Get destination from global variable
-    const destinationCity = searchDestination;
     
     const startDate = document.getElementById('startDate').value;
     

@@ -196,11 +196,14 @@ def generate_schedule():
             # Generate schedule for segment 2  
             stops2 = connection_data['segment2_stops']
             
+            # Define hub city upfront
+            hub_city = connection_data['segment1_stops'][-1]['city_name']
+            
             schedule = []
             current_date = datetime.strptime(start_date, '%Y-%m-%d').date()
             prev_stop_time = None
             
-            # Add segment 1 stops
+            # Add segment 1 stops (with duration logic for selected stops)
             for i, stop in enumerate(stops1):
                 if not stop.get('stop_time'):
                     continue  # Skip stops with no time data
@@ -208,24 +211,72 @@ def generate_schedule():
                 stop_time = datetime.strptime(stop['stop_time'], '%H:%M').time()
                 is_origin = i == 0
                 is_hub = i == len(stops1) - 1
+                city_name = stop['city_name']
                 
                 if prev_stop_time is not None and stop_time < prev_stop_time:
                     current_date = current_date + timedelta(days=1)
                 
-                schedule.append({
-                    'city': stop['city_name'],
-                    'event': 'Board' if is_origin else 'Disembark' if is_hub else 'Stop',
-                    'time': stop_time.strftime('%H:%M'),
-                    'date': current_date.strftime('%Y-%m-%d'),
-                    'route_name': connection_data['route1']['route_name']
-                })
+                # Check if this is a selected stop with duration (but not the hub)
+                is_selected_with_duration = city_name in stop_durations and not is_hub
+                
+                if is_selected_with_duration:
+                    # Add arrival event
+                    schedule.append({
+                        'city': city_name,
+                        'event': 'Stop',
+                        'time': stop_time.strftime('%H:%M'),
+                        'date': current_date.strftime('%Y-%m-%d'),
+                        'route_name': connection_data['route1']['route_name']
+                    })
+                    
+                    # Find next departure after requested duration
+                    stop_dt = datetime.combine(current_date, stop_time)
+                    duration = stop_durations[city_name]
+                    desired_departure_dt = stop_dt + timedelta(hours=duration)
+                    
+                    # For intermediate stops on segment 1, find next train to the hub
+                    next_available = find_next_departure(city_name, desired_departure_dt, hub_city)
+                    
+                    if next_available:
+                        depart_time, depart_date, connecting_stops = next_available
+                        actual_depart_dt = datetime.strptime(f"{depart_date} {depart_time}", '%Y-%m-%d %H:%M')
+                        actual_duration_hours = round((actual_depart_dt - stop_dt).total_seconds() / 3600)
+                        
+                        if actual_duration_hours > 0:
+                            # Add layover event
+                            schedule.append({
+                                'city': city_name,
+                                'event': f'{actual_duration_hours} hour stop' if actual_duration_hours != 1 else '1 hour stop',
+                                'time': stop_time.strftime('%H:%M'),
+                                'date': current_date.strftime('%Y-%m-%d'),
+                                'route_name': connection_data['route1']['route_name']
+                            })
+                            
+                            # Add board event
+                            schedule.append({
+                                'city': city_name,
+                                'event': 'Board',
+                                'time': depart_time,
+                                'date': depart_date,
+                                'route_name': connection_data['route1']['route_name']
+                            })
+                            
+                            current_date = datetime.strptime(depart_date, '%Y-%m-%d').date()
+                else:
+                    # Regular stop (not selected with duration)
+                    schedule.append({
+                        'city': city_name,
+                        'event': 'Board' if is_origin else 'Disembark' if is_hub else 'Stop',
+                        'time': stop_time.strftime('%H:%M'),
+                        'date': current_date.strftime('%Y-%m-%d'),
+                        'route_name': connection_data['route1']['route_name']
+                    })
                 
                 prev_stop_time = stop_time
             
             # Add layover info at hub
             hub_departure_dt = None
             hub_departure_time = None
-            hub_city = connection_data['segment1_stops'][-1]['city_name']
             
             if prev_stop_time and stops2 and stops2[0].get('stop_time'):
                 hub_arrival_dt = datetime.combine(current_date, prev_stop_time)
@@ -293,17 +344,66 @@ def generate_schedule():
                     
                 stop_time = datetime.strptime(stop['stop_time'], '%H:%M').time()
                 is_destination = i == len(stops2) - 1
+                city_name = stop['city_name']
                 
                 if prev_stop_time is not None and stop_time < prev_stop_time:
                     current_date = current_date + timedelta(days=1)
                 
-                schedule.append({
-                    'city': stop['city_name'],
-                    'event': 'Disembark' if is_destination else 'Stop',
-                    'time': stop_time.strftime('%H:%M'),
-                    'date': current_date.strftime('%Y-%m-%d'),
-                    'route_name': connection_data['route2']['route_name']
-                })
+                # Check if this is a selected stop with duration (but not the destination)
+                is_selected_with_duration = city_name in stop_durations and not is_destination
+                
+                if is_selected_with_duration:
+                    # Add arrival event
+                    schedule.append({
+                        'city': city_name,
+                        'event': 'Stop',
+                        'time': stop_time.strftime('%H:%M'),
+                        'date': current_date.strftime('%Y-%m-%d'),
+                        'route_name': connection_data['route2']['route_name']
+                    })
+                    
+                    # Find next departure after requested duration
+                    stop_dt = datetime.combine(current_date, stop_time)
+                    duration = stop_durations[city_name]
+                    desired_departure_dt = stop_dt + timedelta(hours=duration)
+                    
+                    # For intermediate stops on segment 2, find next train to final destination
+                    next_available = find_next_departure(city_name, desired_departure_dt, destination_city)
+                    
+                    if next_available:
+                        depart_time, depart_date, connecting_stops = next_available
+                        actual_depart_dt = datetime.strptime(f"{depart_date} {depart_time}", '%Y-%m-%d %H:%M')
+                        actual_duration_hours = round((actual_depart_dt - stop_dt).total_seconds() / 3600)
+                        
+                        if actual_duration_hours > 0:
+                            # Add layover event
+                            schedule.append({
+                                'city': city_name,
+                                'event': f'{actual_duration_hours} hour stop' if actual_duration_hours != 1 else '1 hour stop',
+                                'time': stop_time.strftime('%H:%M'),
+                                'date': current_date.strftime('%Y-%m-%d'),
+                                'route_name': connection_data['route2']['route_name']
+                            })
+                            
+                            # Add board event
+                            schedule.append({
+                                'city': city_name,
+                                'event': 'Board',
+                                'time': depart_time,
+                                'date': depart_date,
+                                'route_name': connection_data['route2']['route_name']
+                            })
+                            
+                            current_date = datetime.strptime(depart_date, '%Y-%m-%d').date()
+                else:
+                    # Regular stop (not selected with duration)
+                    schedule.append({
+                        'city': city_name,
+                        'event': 'Disembark' if is_destination else 'Stop',
+                        'time': stop_time.strftime('%H:%M'),
+                        'date': current_date.strftime('%Y-%m-%d'),
+                        'route_name': connection_data['route2']['route_name']
+                    })
                 
                 prev_stop_time = stop_time
             
@@ -469,11 +569,12 @@ def generate_schedule():
                         
                         next_dt = datetime.combine(connecting_date, next_time)
                         
-                        # Only add the stop if it's not a selected stop that will be processed later
+                        # Add all stops except those that are selected intermediate stops (not destination)
+                        # Selected intermediate stops will be processed by main loop with their own duration logic
                         if next_is_selected and not next_is_destination:
-                            # Mark it as consumed so we skip it in main loop
-                            consumed_cities.add(next_stop['city_name'])
-                            # Don't add to schedule - let main loop process it
+                            # Don't add selected intermediate stops or mark them consumed
+                            # Let main loop process them with their duration logic
+                            pass
                         else:
                             # Add non-selected stops and the destination
                             schedule.append({
@@ -486,14 +587,23 @@ def generate_schedule():
                         
                         connecting_prev_time = next_time
                         
-                        # If we hit the destination or a selected stop, stop adding
-                        if next_is_destination or next_is_selected:
+                        # If we hit the destination, stop adding
+                        if next_is_destination:
+                            break
+                        
+                        # If we hit a selected stop (not destination), still stop but don't mark consumed
+                        if next_is_selected:
                             break
                     
                     # Update current_date for next iteration
                     current_date = connecting_date
                     consumed_cities.add(stop['city_name'])
+                    
+                    # Skip ahead in the main loop to the next stop after all consumed cities
+                    # Find the next stop that hasn't been consumed
                     i += 1
+                    while i <= end_idx and stops[i]['city_name'] in consumed_cities:
+                        i += 1
                     continue
             
             # Handle destination or non-selected stops
