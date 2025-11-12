@@ -492,20 +492,17 @@ function displaySchedule(data) {
     const scheduleBody = document.getElementById('scheduleBody');
     scheduleBody.innerHTML = '';
     
-    let lastRouteName = null;
-    
     data.schedule.forEach((event) => {
-        // Add segment header if route changes
-        const currentRouteName = event.route_name;
-        if (lastRouteName !== null && lastRouteName !== currentRouteName && !currentRouteName.includes('Connecting')) {
+        // Handle explicit segment headers from backend
+        if (event.is_segment_header) {
             const headerRow = document.createElement('tr');
             headerRow.className = 'segment-header-row';
             headerRow.innerHTML = `
-                <td colspan="4"><strong>🚆 ${currentRouteName}</strong></td>
+                <td colspan="4"><strong>${event.event}</strong></td>
             `;
             scheduleBody.appendChild(headerRow);
+            return;
         }
-        lastRouteName = currentRouteName;
         
         const row = document.createElement('tr');
         

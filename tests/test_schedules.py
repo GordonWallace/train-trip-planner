@@ -388,22 +388,26 @@ class TestConnectionRouteSchedules(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.get_json()
         
-        # Find Chicago arrival and layover events
+        # Find Chicago events
         chicago_events = [e for e in data['schedule'] if e['city'] == 'Chicago']
         self.assertGreater(len(chicago_events), 0)
         
-        # Should have arrival (Disembark) and layover events
-        has_disembark = any('Disembark' in e['event'] for e in chicago_events)
-        has_layover = any('layover' in e['event'].lower() for e in chicago_events)
+        # Should have disembark+layover event and board event
+        has_disembark_layover = any('Disembark - ' in e['event'] and 'layover' in e['event'].lower() for e in chicago_events)
+        has_board = any('Board' in e['event'] for e in chicago_events)
         
-        self.assertTrue(has_disembark)
-        self.assertTrue(has_layover)
+        self.assertTrue(has_disembark_layover, "Should have 'Disembark - x hour layover' event")
+        self.assertTrue(has_board, "Should have Board event")
         
-        # Find the layover event and verify it shows the actual train departure time (14:25)
-        layover_event = next(e for e in chicago_events if 'layover' in e['event'].lower())
-        # Should show 14:25 as the departure time (SW Chief's actual departure)
-        self.assertEqual(layover_event['time'], '14:25',
-            "Should show actual SW Chief departure time of 14:25")
+        # The disembark+layover event should show the arrival time (10:12)
+        disembark_layover_event = next(e for e in chicago_events if 'Disembark - ' in e['event'] and 'layover' in e['event'].lower())
+        self.assertEqual(disembark_layover_event['time'], '10:12',
+            "Disembark event should show arrival time of 10:12")
+        
+        # The board event should show the actual SW Chief departure time (14:25)
+        board_event = next(e for e in chicago_events if 'Board' in e['event'])
+        self.assertEqual(board_event['time'], '14:25',
+            "Board event should show actual SW Chief departure time of 14:25")
 
     def test_connection_route_intermediate_stop_duration_segment1(self):
         """Test that intermediate stops on segment 1 with duration create layover events"""
@@ -428,11 +432,11 @@ class TestConnectionRouteSchedules(unittest.TestCase):
         south_bend_events = [e for e in schedule if e['city'] == 'South Bend']
         self.assertGreater(len(south_bend_events), 0, "Should have South Bend in schedule")
         
-        # Should have Stop event and layover event when duration is requested
-        has_stop = any('Stop' in e['event'] for e in south_bend_events)
+        # Should have layover/stop event and board event when duration is requested
         has_layover = any('hour' in e['event'].lower() for e in south_bend_events)
-        self.assertTrue(has_stop, "Should have Stop event for South Bend")
-        self.assertTrue(has_layover, "Should have layover event for South Bend since duration was requested")
+        has_board = any('Board' in e['event'] for e in south_bend_events)
+        self.assertTrue(has_layover, "Should have duration/layover event for South Bend since duration was requested")
+        self.assertTrue(has_board, "Should have Board event after layover for South Bend")
 
     def test_connection_route_intermediate_stop_duration_segment2(self):
         """Test that intermediate stops on segment 2 with duration create layover events"""
@@ -457,11 +461,11 @@ class TestConnectionRouteSchedules(unittest.TestCase):
         kc_events = [e for e in schedule if e['city'] == 'Kansas City']
         self.assertGreater(len(kc_events), 0, "Should have Kansas City in schedule")
         
-        # Should have Stop event and layover event when duration is requested
-        has_stop = any('Stop' in e['event'] for e in kc_events)
+        # Should have layover/stop event and board event when duration is requested
         has_layover = any('hour' in e['event'].lower() for e in kc_events)
-        self.assertTrue(has_stop, "Should have Stop event for Kansas City")
-        self.assertTrue(has_layover, "Should have layover event for Kansas City since duration was requested")
+        has_board = any('Board' in e['event'] for e in kc_events)
+        self.assertTrue(has_layover, "Should have duration/layover event for Kansas City since duration was requested")
+        self.assertTrue(has_board, "Should have Board event after layover for Kansas City")
 
     def test_connection_route_intermediate_stop_no_duration(self):
         """Test that intermediate stops without durations don't add layover events"""
@@ -557,19 +561,15 @@ class TestConnectionRouteSchedules(unittest.TestCase):
             self.assertGreater(len(city_events), 0,
                 f"Requested stop {city} should have events in schedule")
             
-            # Get arrival and departure times for this city
-            arrival_events = [e for e in city_events if 'arrival' in e['event'].lower() or e['event'] == 'Stop']
-            departure_events = [e for e in city_events if 'layover' in e['event'].lower() or 'board' in e['event'].lower()]
+            # Get layover and board events for this city
+            layover_events = [e for e in city_events if 'hour' in e['event'].lower()]
+            board_events = [e for e in city_events if 'board' in e['event'].lower()]
             
-            # Verify there's at least an arrival event
-            self.assertGreater(len(arrival_events), 0,
-                f"City {city} should have an arrival event")
-            
-            # BUG CHECK: Cities with requested durations should have layover events, not just plain stops
-            # If we only have "Stop" events and no layover, that means duration wasn't applied
-            has_layover_event = any('hour' in e['event'].lower() for e in city_events)
+            # BUG CHECK: Cities with requested durations should have layover events, not separate Stop events
+            # We should see a "X hour stop" event and a Board event, but not a plain "Stop" event
+            has_layover_event = len(layover_events) > 0
             self.assertTrue(has_layover_event,
-                f"City {city} with 2-hour requested duration should have a layover event (e.g., '2 hour stop'), not just 'Stop'")
+                f"City {city} with 2-hour requested duration should have a layover event (e.g., '2 hour stop')")
 
 
 if __name__ == '__main__':
