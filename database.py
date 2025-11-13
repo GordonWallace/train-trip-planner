@@ -300,56 +300,172 @@ def get_stops_between_cities(route_id, from_city, to_city):
     conn.close()
     return stops
 
-def find_connection_hubs(origin_city, destination_city):
-    """Find all cities that have routes to both origin and destination."""
+def find_connection_paths(origin_city, destination_city, max_hops=3):
+    """
+    Find all possible connection paths from origin to destination.
+    Returns a list of paths, each path being a list of (hub_city, route_id) tuples.
+    Each path represents: origin --(route1)--> hub1 --(route2)--> hub2 ... --(routeN)--> destination
+    
+    Uses BFS to find shortest paths first.
+    """
     conn = sqlite3.connect(DATABASE_PATH)
     conn.row_factory = sqlite3.Row
     c = conn.cursor()
     
-    # Find routes from origin city
-    c.execute('''SELECT DISTINCT r1.id as route1_id, r1.route_name as route1_name
-                 FROM routes r1
-                 INNER JOIN stops s1 ON r1.id = s1.route_id
-                 WHERE s1.city_name = ?''', (origin_city,))
-    origin_routes = c.fetchall()
+    # Get all routes and their stops for quick lookup
+    c.execute('SELECT id, origin_city, destination_city, route_name FROM routes')
+    all_routes = {row['id']: {
+        'name': row['route_name'],
+        'origin': row['origin_city'],
+        'destination': row['destination_city']
+    } for row in c.fetchall()}
     
-    hubs_with_connections = []
+    c.execute('SELECT route_id, city_name, stop_number FROM stops ORDER BY route_id, stop_number')
+    route_stops = {}
+    for row in c.fetchall():
+        if row['route_id'] not in route_stops:
+            route_stops[row['route_id']] = []
+        route_stops[row['route_id']].append({
+            'city': row['city_name'],
+            'stop_num': row['stop_number']
+        })
     
-    for orig_route in origin_routes:
-        route1_id = orig_route['route1_id']
-        route1_name = orig_route['route1_name']
+    def get_routes_between(from_city, to_city):
+        """Find all routes that go from from_city to to_city."""
+        routes = []
+        for route_id, stops in route_stops.items():
+            cities = [s['city'] for s in stops]
+            if from_city in cities and to_city in cities:
+                from_idx = cities.index(from_city)
+                to_idx = cities.index(to_city)
+                if from_idx < to_idx:  # Must be in order
+                    routes.append(route_id)
+        return routes
+    
+    # BFS to find paths
+    from collections import deque
+    queue = deque([
+        (origin_city, [])  # (current_city, path_so_far)
+    ])
+    
+    found_paths = []
+    visited_states = set()  # Prevent infinite loops: (current_city, path_length)
+    
+    while queue:
+        current_city, path = queue.popleft()
         
-        # Get all cities on this route after origin
-        c.execute('''SELECT DISTINCT s.city_name, s.stop_number
-                     FROM stops s
-                     WHERE s.route_id = ?
-                     AND s.stop_number > (SELECT stop_number FROM stops WHERE route_id = ? AND city_name = ?)
-                     ORDER BY s.stop_number''', (route1_id, route1_id, origin_city))
-        stops_on_route1 = c.fetchall()
+        # Prevent revisiting same city with same path length
+        state = (current_city, len(path))
+        if state in visited_states:
+            continue
+        visited_states.add(state)
         
-        for stop in stops_on_route1:
-            hub_city = stop['city_name']
-            
-            # Check if there's a route from this hub to destination
-            c.execute('''SELECT DISTINCT r2.id as route2_id, r2.route_name as route2_name
-                         FROM routes r2
-                         INNER JOIN stops s2 ON r2.id = s2.route_id
-                         INNER JOIN stops s3 ON r2.id = s3.route_id
-                         WHERE s2.city_name = ? AND s3.city_name = ?
-                         AND s2.stop_number < s3.stop_number''', (hub_city, destination_city))
-            dest_routes = c.fetchall()
-            
-            for dest_route in dest_routes:
-                hubs_with_connections.append({
-                    'hub': hub_city,
-                    'route1_id': route1_id,
-                    'route1_name': route1_name,
-                    'route2_id': dest_route['route2_id'],
-                    'route2_name': dest_route['route2_name']
-                })
+        # If we reached destination, save this path
+        if current_city == destination_city and len(path) > 0:
+            found_paths.append(path)
+            continue
+        
+        # Don't exceed max hops
+        if len(path) >= max_hops:
+            continue
+        
+        # Find all routes from current city
+        routes_from_here = get_routes_between(current_city, destination_city)
+        
+        # Also find routes to intermediate cities
+        all_destinations = set()
+        for route_id in route_stops.keys():
+            stops = route_stops[route_id]
+            cities = [s['city'] for s in stops]
+            try:
+                curr_idx = cities.index(current_city)
+                for i in range(curr_idx + 1, len(cities)):
+                    all_destinations.add(cities[i])
+            except ValueError:
+                pass
+        
+        for next_city in all_destinations:
+            # Check if there's a route from current to next
+            routes = get_routes_between(current_city, next_city)
+            for route_id in routes:
+                new_path = path + [(next_city, route_id)]
+                queue.append((next_city, new_path))
     
     conn.close()
-    return hubs_with_connections
+    
+    # Return paths sorted by length (shortest first)
+    return sorted(found_paths, key=len)
+
+
+def find_connection_hubs(origin_city, destination_city):
+    """
+    Find all connection paths from origin to destination.
+    Supports both 2-hop (single hub) and N-hop (multiple hubs) connections.
+    
+    Returns:
+        List of dicts, where each dict represents a connection path with:
+        - 'hubs': List of hub cities (intermediate connection points)
+        - 'route_ids': List of route IDs making up this path
+        - 'route_names': List of route names
+        - 'path_length': Number of hops (len(route_ids))
+    """
+    paths = find_connection_paths(origin_city, destination_city)
+    
+    if not paths:
+        return []
+    
+    connections = []
+    for path in paths:
+        # path is a list of (hub_city, route_id) tuples
+        if not path:
+            continue
+        
+        route_ids = [route_id for hub_city, route_id in path]
+        hubs = [hub_city for hub_city, route_id in path[:-1]]  # Exclude final destination
+        
+        # Get route names
+        conn = sqlite3.connect(DATABASE_PATH)
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+        
+        route_names = []
+        for route_id in route_ids:
+            c.execute('SELECT route_name FROM routes WHERE id = ?', (route_id,))
+            result = c.fetchone()
+            if result:
+                route_names.append(result['route_name'])
+        
+        conn.close()
+        
+        connections.append({
+            'route_ids': route_ids,
+            'hubs': hubs,
+            'route_names': route_names,
+            'path_length': len(route_ids)
+        })
+    
+    # For backward compatibility, also support old-style format for 2-hop connections
+    # (single hub) by extracting the hub and route1/route2 info
+    backward_compatible = []
+    for conn in connections:
+        if conn['path_length'] == 2:
+            # 2-hop connection: convert to old format for compatibility
+            backward_compatible.append({
+                'hub': conn['hubs'][0],
+                'route1_id': conn['route_ids'][0],
+                'route1_name': conn['route_names'][0],
+                'route2_id': conn['route_ids'][1],
+                'route2_name': conn['route_names'][1],
+                # Also include new format
+                'route_ids': conn['route_ids'],
+                'hubs': conn['hubs'],
+                'path_length': 2
+            })
+        else:
+            # N-hop connection (3 or more): only new format
+            backward_compatible.append(conn)
+    
+    return backward_compatible
 
 def get_connection_route(origin_city, destination_city, hub_city, route1_id, route2_id):
     """Get the combined route information for a connection through a hub."""
@@ -397,6 +513,91 @@ def get_connection_route(origin_city, destination_city, hub_city, route1_id, rou
         'route2': route2,
         'hub': hub_city
     }
+
+def get_multi_hop_connection_route(origin_city, destination_city, route_ids):
+    """
+    Get the combined route information for a multi-hop connection.
+    
+    Args:
+        origin_city: Starting city
+        destination_city: Ending city
+        route_ids: List of route IDs representing the path [1, 2, 3, ...]
+    
+    Returns:
+        Dict with:
+        - 'segments': List of segment dicts, each containing:
+          - 'route': The route object for this segment
+          - 'stops': List of stops for this segment
+          - 'start_city': City where this segment starts
+          - 'end_city': City where this segment ends
+        - 'hubs': List of hub cities (connection points)
+        - 'route_ids': The list of route IDs
+    """
+    if len(route_ids) < 2:
+        return None
+    
+    conn = sqlite3.connect(DATABASE_PATH)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    
+    segments = []
+    hubs = []
+    prev_end_city = origin_city
+    
+    for route_idx, route_id in enumerate(route_ids):
+        is_first = route_idx == 0
+        is_last = route_idx == len(route_ids) - 1
+        
+        # Get route info
+        c.execute('SELECT * FROM routes WHERE id = ?', (route_id,))
+        route = dict(c.fetchone())
+        
+        # Determine start and end city for this segment
+        if is_first:
+            start_city = origin_city
+        else:
+            start_city = prev_end_city
+            hubs.append(prev_end_city)
+        
+        end_city = destination_city if is_last else None
+        
+        if end_city is None:
+            # Need to find the end city by looking at next route
+            if route_idx + 1 < len(route_ids):
+                next_route_id = route_ids[route_idx + 1]
+                c.execute('SELECT origin_city FROM routes WHERE id = ?', (next_route_id,))
+                next_route_result = c.fetchone()
+                if next_route_result:
+                    end_city = next_route_result['origin_city']
+        
+        if not end_city:
+            end_city = route['destination_city']
+        
+        # Get stops from start to end on this route
+        c.execute('''SELECT * FROM stops
+                     WHERE route_id = ?
+                     AND stop_number >= (SELECT stop_number FROM stops WHERE route_id = ? AND city_name = ?)
+                     AND stop_number <= (SELECT stop_number FROM stops WHERE route_id = ? AND city_name = ?)
+                     ORDER BY stop_number''', (route_id, route_id, start_city, route_id, end_city))
+        stops = [dict(row) for row in c.fetchall()]
+        
+        segments.append({
+            'route': route,
+            'stops': stops,
+            'start_city': start_city,
+            'end_city': end_city
+        })
+        
+        prev_end_city = end_city
+    
+    conn.close()
+    
+    return {
+        'segments': segments,
+        'hubs': hubs,
+        'route_ids': route_ids
+    }
+
 
 if __name__ == '__main__':
     init_database()
