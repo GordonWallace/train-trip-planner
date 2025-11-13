@@ -830,18 +830,13 @@ function generateTimeline(schedule) {
         if (segmentData.type === 'train') {
             timeDiv.textContent = formatTimeRange(segmentData.startDate, segmentData.startTimeStr, segmentData.endDate, segmentData.endTimeStr);
         } else {
-            const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-            const startDateObj = new Date(segmentData.startDate);
-            const endDateObj = new Date(segmentData.endDate);
-            const startMonth = monthNames[startDateObj.getMonth()];
-            const endMonth = monthNames[endDateObj.getMonth()];
-            const startDay = startDateObj.getDate();
-            const endDay = endDateObj.getDate();
+            const startParsed = parseDateString(segmentData.startDate);
+            const endParsed = parseDateString(segmentData.endDate);
             
             if (segmentData.startDate === segmentData.endDate) {
-                timeDiv.textContent = `${startMonth} ${startDay} ${segmentData.startTimeStr}`;
+                timeDiv.textContent = `${startParsed.monthName} ${startParsed.day} ${segmentData.startTimeStr}`;
             } else {
-                timeDiv.textContent = `${startMonth} ${startDay} ${segmentData.startTimeStr} to ${endMonth} ${endDay} ${segmentData.endTimeStr}`;
+                timeDiv.textContent = `${startParsed.monthName} ${startParsed.day} ${segmentData.startTimeStr} to ${endParsed.monthName} ${endParsed.day} ${segmentData.endTimeStr}`;
             }
         }
         
@@ -1374,24 +1369,30 @@ async function loadScheduleById(scheduleId) {
 // Delete a schedule
 async // Helper function to format time range nicely (e.g., "Nov 14 2:25 PM to Nov 15 5:45 AM")
 function formatTimeRange(startDate, startTimeStr, endDate, endTimeStr) {
-    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    
-    const parseDate = (dateStr) => new Date(dateStr);
-    const startDateObj = parseDate(startDate);
-    const endDateObj = parseDate(endDate);
-    
-    const startMonth = monthNames[startDateObj.getMonth()];
-    const endMonth = monthNames[endDateObj.getMonth()];
-    const startDay = startDateObj.getDate();
-    const endDay = endDateObj.getDate();
+    const startParsed = parseDateString(startDate);
+    const endParsed = parseDateString(endDate);
     
     const isSameDay = startDate === endDate;
     
     if (isSameDay) {
-        return `${startMonth} ${startDay} ${startTimeStr} to ${endTimeStr}`;
+        return `${startParsed.monthName} ${startParsed.day} ${startTimeStr} to ${endTimeStr}`;
     } else {
-        return `${startMonth} ${startDay} ${startTimeStr} to ${endMonth} ${endDay} ${endTimeStr}`;
+        return `${startParsed.monthName} ${startParsed.day} ${startTimeStr} to ${endParsed.monthName} ${endParsed.day} ${endTimeStr}`;
     }
+}
+
+// Helper function to parse YYYY-MM-DD string and extract month/day without timezone issues
+function parseDateString(dateStr) {
+    const parts = dateStr.split('-');
+    const year = parseInt(parts[0]);
+    const month = parseInt(parts[1]) - 1; // JavaScript months are 0-indexed
+    const day = parseInt(parts[2]);
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return {
+        monthName: monthNames[month],
+        day: day,
+        year: year
+    };
 }
 
 async function deleteScheduleById(scheduleId) {
