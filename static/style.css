@@ -740,6 +740,236 @@ button:focus {
     margin-top: 20px;
 }
 
+/* Time-based Timeline Visualization */
+.timeline-section {
+    margin-top: 50px;
+    padding: 20px;
+    background: #f9f9f9;
+    border-radius: 8px;
+    border-left: 4px solid #003d82;
+}
+
+.timeline-section h2 {
+    margin-bottom: 20px;
+    color: #003d82;
+    font-size: 1.5em;
+}
+
+.timeline-wrapper {
+    position: relative;
+    overflow-x: auto;
+    border: 1px solid #d0d0d0;
+    border-radius: 6px;
+    background: white;
+    margin-bottom: 15px;
+    width: 100%;
+}
+
+.timeline-container {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 20px 20px 60px 0;
+}
+
+/* Event blocks */
+.timeline-events {
+    position: relative;
+    height: 150px;
+    padding: 0;
+    margin: 0 0 0 60px;
+    z-index: 10;
+}
+
+.timeline-event {
+    position: absolute;
+    top: 10px;
+    height: 120px;
+    border-radius: 6px;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    cursor: pointer;
+    transition: box-shadow 0.2s;
+    overflow: visible;
+    text-overflow: ellipsis;
+    min-width: 40px;
+}
+
+.timeline-event:hover {
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+.timeline-event-train {
+    background: linear-gradient(135deg, #003d82, #1565a0);
+    color: white;
+    border-left: 4px solid #ffc600;
+}
+
+.timeline-event-train.route2 {
+    background: linear-gradient(135deg, #8b4513, #c85a2c);
+    border-left-color: #d4a574;
+}
+
+.timeline-event-city {
+    background: linear-gradient(135deg, #4CAF50, #388E3C);
+    color: white;
+    border-left: 4px solid #8BC34A;
+}
+
+.timeline-event-layover {
+    background: #FFD700;
+    color: #333;
+    border-left: 4px solid #FFC700;
+}
+
+.timeline-event-label {
+    font-weight: 700;
+    font-size: 0.95em;
+    word-break: break-word;
+    line-height: 1.2;
+}
+
+.timeline-event-type {
+    font-size: 0.75em;
+    opacity: 0.85;
+    margin-top: 2px;
+}
+
+.timeline-event-time {
+    font-size: 0.75em;
+    font-weight: 600;
+    line-height: 1.2;
+    white-space: normal;
+    word-break: break-word;
+}
+
+.timeline-event-duration {
+    font-size: 0.7em;
+    opacity: 0.75;
+    margin-top: 2px;
+}
+
+.timeline-tooltip {
+    position: absolute;
+    background: #333;
+    color: white;
+    padding: 10px 12px;
+    border-radius: 4px;
+    font-size: 0.85em;
+    white-space: normal;
+    z-index: 1;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    max-width: 150px;
+    text-align: center;
+    line-height: 1.4;
+}
+
+.timeline-tooltip::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-top: 6px solid #333;
+}
+
+.timeline-event.narrow {
+    color: transparent;
+}
+
+.timeline-event.narrow .timeline-event-label,
+.timeline-event.narrow .timeline-event-type,
+.timeline-event.narrow .timeline-event-time,
+.timeline-event.narrow .timeline-event-duration {
+    display: none;
+}
+
+/* Time axis at bottom */
+.timeline-axis {
+    position: relative;
+    height: 50px;
+    display: flex;
+    align-items: flex-start;
+    border-top: 2px solid #333;
+    padding-top: 8px;
+    margin: 0 0 0 60px;
+}
+
+.timeline-tick {
+    position: absolute;
+    font-size: 0.75em;
+    color: #666;
+    padding-top: 8px;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 1px;
+}
+
+.timeline-tick-mark {
+    position: absolute;
+    width: 1px;
+    height: 8px;
+    background: #333;
+    top: -8px;
+    left: 0;
+}
+
+.timeline-tick-label {
+    position: absolute;
+    top: 10px;
+    left: -40px;
+    width: 80px;
+    text-align: center;
+    white-space: nowrap;
+}
+
+/* Timeline legend */
+.timeline-legend {
+    display: flex;
+    gap: 20px;
+    margin-top: 15px;
+    padding-top: 15px;
+    border-top: 1px solid #d0d0d0;
+    font-size: 0.85em;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
+.timeline-legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.timeline-legend-box {
+    width: 16px;
+    height: 16px;
+    border-radius: 3px;
+    flex-shrink: 0;
+}
+
+.timeline-tooltip {
+    position: absolute;
+    background: rgba(0, 0, 0, 0.9);
+    color: white;
+    padding: 8px 12px;
+    border-radius: 4px;
+    font-size: 0.8em;
+    white-space: nowrap;
+    pointer-events: none;
+    z-index: 1000;
+    display: none;
+}
+
+
 .modal-close {
     padding: 10px 24px !important;
     margin: 0 !important;

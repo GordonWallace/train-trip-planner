@@ -501,6 +501,7 @@ async function generateSchedule() {
             document.getElementById('stopsSection').style.display = 'none';
             document.getElementById('routesSection').style.display = 'none';
             document.getElementById('scheduleSection').style.display = 'block';
+            document.getElementById('timelineSection').style.display = 'block';
             document.getElementById('scheduleSection').scrollIntoView({ behavior: 'smooth' });
         } else {
             showError(data.error || 'Error generating schedule');
@@ -601,6 +602,411 @@ function displaySchedule(data, selectedStopsData = null) {
     
     // Save the current schedule state for editing, passing the selected stops
     saveScheduleState(data, selectedStopsData);
+    
+    // Generate and display the timeline
+    generateTimeline(data.schedule);
+}
+
+// Generate a time-based timeline visualization of the trip
+function generateTimeline(schedule) {
+    const timelineContainer = document.getElementById('timelineContainer');
+    timelineContainer.innerHTML = '';
+    
+    if (!schedule || schedule.length === 0) return;
+    const segments = [];
+    let currentTrain = null;
+    let trainStartCity = null;
+    let trainStartTime = null;
+    let trainStartTimeStr = null;
+    let trainStartDate = null;
+    let firstTime = null;
+    let lastTime = null;
+    
+    schedule.forEach((event, index) => {
+        if (event.is_segment_header) {
+            currentTrain = event.event.replace('🚆 ', '').trim();
+            return;
+        }
+        
+        const eventDateTime = new Date(`${event.date}T${event.time}`);
+        
+        if (!firstTime || eventDateTime < firstTime) firstTime = eventDateTime;
+        if (!lastTime || eventDateTime > lastTime) lastTime = eventDateTime;
+        
+        // Check if this is a layover/stop where user stays
+        const isLayover = event.event.includes('hour stop') || event.event.includes('layover');
+        
+        if (isLayover) {
+            // End any current train segment at this layover point
+            if (trainStartCity && trainStartTime) {
+                segments.push({
+                    type: 'train',
+                    startCity: trainStartCity,
+                    endCity: event.city,
+                    startTime: trainStartTime,
+                    startTimeStr: trainStartTimeStr,
+                    startDate: trainStartDate,
+                    endTime: eventDateTime,
+                    endTimeStr: event.time,
+                    endDate: event.date,
+                    train: currentTrain
+                });
+            }
+            
+            // Find the next non-layover event to determine layover end
+            let layoverEndTime = eventDateTime;
+            let layoverEndTimeStr = event.time;
+            let layoverEndDate = event.date;
+            
+            for (let i = index + 1; i < schedule.length; i++) {
+                const nextEvent = schedule[i];
+                if (nextEvent.is_segment_header) continue;
+                if (!nextEvent.event.includes('hour stop') && !nextEvent.event.includes('layover')) {
+                    layoverEndTime = new Date(`${nextEvent.date}T${nextEvent.time}`);
+                    layoverEndTimeStr = nextEvent.time;
+                    layoverEndDate = nextEvent.date;
+                    break;
+                }
+            }
+            
+            // Create layover segment
+            segments.push({
+                type: 'layover',
+                city: event.city,
+                startTime: eventDateTime,
+                startTimeStr: event.time,
+                startDate: event.date,
+                endTime: layoverEndTime,
+                endTimeStr: layoverEndTimeStr,
+                endDate: layoverEndDate,
+                duration: event.event,
+                train: currentTrain
+            });
+            
+            // Reset train tracking
+            trainStartCity = null;
+            trainStartTime = null;
+            trainStartTimeStr = null;
+            trainStartDate = null;
+        } else if (event.event.includes('Board')) {
+            // Starting a train journey
+            trainStartCity = event.city;
+            trainStartTime = eventDateTime;
+            trainStartTimeStr = event.time;
+            trainStartDate = event.date;
+        }
+    });
+    
+    // Add final train segment if exists
+    if (trainStartCity && trainStartTime && lastTime > trainStartTime) {
+        const lastEvent = schedule.filter(e => !e.is_segment_header).pop();
+        if (lastEvent) {
+            segments.push({
+                type: 'train',
+                startCity: trainStartCity,
+                endCity: lastEvent.city,
+                startTime: trainStartTime,
+                startTimeStr: trainStartTimeStr,
+                startDate: trainStartDate,
+                endTime: new Date(`${lastEvent.date}T${lastEvent.time}`),
+                endTimeStr: lastEvent.time,
+                endDate: lastEvent.date,
+                train: currentTrain
+            });
+        }
+    }
+    
+    if (!firstTime || !lastTime || segments.length === 0) return;
+    
+    // Round timeline to 6-hour increments
+    const timelineStart = new Date(firstTime);
+    timelineStart.setHours(Math.floor(timelineStart.getHours() / 6) * 6, 0, 0, 0);
+    
+    const timelineEnd = new Date(lastTime);
+    timelineEnd.setHours(Math.ceil(timelineEnd.getHours() / 6) * 6, 0, 0, 0);
+    
+    const totalMinutes = (timelineEnd - timelineStart) / (1000 * 60);
+    const minWidth = Math.max(window.innerWidth - 200, 400);
+    const actualPixelsPerMinute = minWidth / totalMinutes;
+    const actualTotalWidth = totalMinutes * actualPixelsPerMinute;
+    
+    // Create wrapper
+    const wrapper = document.createElement('div');
+    wrapper.className = 'timeline-wrapper';
+    wrapper.style.marginBottom = '20px';
+    wrapper.style.marginTop = '20px';
+    
+    // Create main container
+    const container = document.createElement('div');
+    container.className = 'timeline-container';
+    container.style.width = actualTotalWidth + 100 + 'px';
+    
+    // Add events first (before axis)
+    const eventsDiv = document.createElement('div');
+    eventsDiv.className = 'timeline-events';
+    eventsDiv.style.width = actualTotalWidth + 'px';
+    // Create a function that maps any time to pixel position
+    const getPixelPosition = (time) => {
+        return Math.round((time - timelineStart) / (1000 * 60) * actualPixelsPerMinute);
+    };
+    
+    // Build the axis first to establish the coordinate system
+    const axis = document.createElement('div');
+    axis.className = 'timeline-axis timeline-axis-bottom';
+    axis.style.width = actualTotalWidth + 'px';
+    
+    // Generate time ticks with 6-hour increments - this is the source of truth for positioning
+    let currentTime = new Date(timelineStart);
+    let lastDateShown = null;
+    
+    while (currentTime <= timelineEnd) {
+        const offset = getPixelPosition(currentTime);
+        const dateStr = currentTime.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        
+        const tick = document.createElement('div');
+        tick.className = 'timeline-tick';
+        tick.style.left = offset + 'px';
+        
+        const tickLabel = document.createElement('div');
+        tickLabel.className = 'timeline-tick-label';
+        
+        // Show date change
+        if (!lastDateShown || dateStr !== lastDateShown) {
+            tickLabel.innerHTML = `<div style="font-size: 0.7em; font-weight: 600;">${dateStr}</div><div>${formatTimeShort(currentTime)}</div>`;
+            lastDateShown = dateStr;
+        } else {
+            tickLabel.textContent = formatTimeShort(currentTime);
+        }
+        
+        const mark = document.createElement('div');
+        mark.className = 'timeline-tick-mark';
+        
+        tick.appendChild(mark);
+        tick.appendChild(tickLabel);
+        axis.appendChild(tick);
+        
+        // Increment time by 6 hours
+        currentTime = new Date(currentTime.getTime() + 6 * 60 * 60 * 1000);
+    }
+    
+    // Now build event blocks using the same positioning function
+    segments.forEach((segmentData) => {
+        const offset = getPixelPosition(segmentData.startTime);
+        const endOffset = getPixelPosition(segmentData.endTime);
+        const width = endOffset - offset;
+        
+        const eventBlock = document.createElement('div');
+        eventBlock.className = `timeline-event timeline-event-${segmentData.type}`;
+        
+        // Add route styling for trains
+        if (segmentData.type === 'train' && segmentData.train.includes('Southwest')) {
+            eventBlock.classList.add('route2');
+        }
+        
+        eventBlock.style.left = offset + 'px';
+        eventBlock.style.width = Math.max(width, 40) + 'px';
+        
+        const label = document.createElement('div');
+        label.className = 'timeline-event-label';
+        
+        if (segmentData.type === 'train') {
+            label.textContent = `${segmentData.startCity} → ${segmentData.endCity}`;
+        } else {
+            label.textContent = segmentData.city;
+        }
+        
+        const typeDiv = document.createElement('div');
+        typeDiv.className = 'timeline-event-type';
+        
+        if (segmentData.type === 'train') {
+            typeDiv.textContent = segmentData.train;
+        } else {
+            typeDiv.textContent = 'Layover';
+        }
+        
+        const timeDiv = document.createElement('div');
+        timeDiv.className = 'timeline-event-time';
+        
+        if (segmentData.type === 'train') {
+            timeDiv.textContent = formatTimeRange(segmentData.startDate, segmentData.startTimeStr, segmentData.endDate, segmentData.endTimeStr);
+        } else {
+            const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            const startDateObj = new Date(segmentData.startDate);
+            const endDateObj = new Date(segmentData.endDate);
+            const startMonth = monthNames[startDateObj.getMonth()];
+            const endMonth = monthNames[endDateObj.getMonth()];
+            const startDay = startDateObj.getDate();
+            const endDay = endDateObj.getDate();
+            
+            if (segmentData.startDate === segmentData.endDate) {
+                timeDiv.textContent = `${startMonth} ${startDay} ${segmentData.startTimeStr}`;
+            } else {
+                timeDiv.textContent = `${startMonth} ${startDay} ${segmentData.startTimeStr} to ${endMonth} ${endDay} ${segmentData.endTimeStr}`;
+            }
+        }
+        
+        eventBlock.appendChild(label);
+        eventBlock.appendChild(typeDiv);
+        eventBlock.appendChild(timeDiv);
+        
+        // Add duration info for trains and layovers
+        if (segmentData.type === 'train') {
+            const hours = Math.round((segmentData.endTime - segmentData.startTime) / (1000 * 60 * 60) * 10) / 10;
+            const durationDiv = document.createElement('div');
+            durationDiv.className = 'timeline-event-duration';
+            durationDiv.textContent = `${hours} hours`;
+            eventBlock.appendChild(durationDiv);
+        } else if (segmentData.type === 'layover' && segmentData.duration) {
+            const durationDiv = document.createElement('div');
+            durationDiv.className = 'timeline-event-duration';
+            durationDiv.textContent = segmentData.duration;
+            eventBlock.appendChild(durationDiv);
+        }
+        
+        // If event is too narrow (less than ~8 characters worth of space), hide text and show on hover
+        const MIN_WIDTH_FOR_TEXT = 80; // roughly 8 characters
+        if (width < MIN_WIDTH_FOR_TEXT) {
+            eventBlock.classList.add('narrow');
+        }
+        
+        // Build tooltip content
+        let tooltipText = '';
+        if (segmentData.type === 'train') {
+            const hours = Math.round((segmentData.endTime - segmentData.startTime) / (1000 * 60 * 60) * 10) / 10;
+            tooltipText = `${segmentData.startCity} → ${segmentData.endCity}<br>${segmentData.train}<br>${hours} hours`;
+        } else {
+            tooltipText = `${segmentData.city}<br>${segmentData.duration}`;
+        }
+        
+        // Add tooltip on hover - ONLY for narrow events
+        eventBlock.addEventListener('mouseenter', function() {
+            // Only show tooltip if event is narrow (< 80px)
+            if (!eventBlock.classList.contains('narrow')) {
+                return;
+            }
+            
+            const tooltip = document.createElement('div');
+            tooltip.innerHTML = tooltipText;
+            
+            // Fixed positioning - append to body, not container
+            tooltip.style.position = 'fixed';
+            tooltip.style.background = '#333';
+            tooltip.style.color = 'white';
+            tooltip.style.padding = '10px 12px';
+            tooltip.style.borderRadius = '4px';
+            tooltip.style.fontSize = '0.85em';
+            tooltip.style.whiteSpace = 'normal';
+            tooltip.style.zIndex = '9999';
+            tooltip.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.3)';
+            tooltip.style.maxWidth = '150px';
+            tooltip.style.textAlign = 'center';
+            tooltip.style.lineHeight = '1.4';
+            tooltip.style.pointerEvents = 'auto';
+            
+            const rect = eventBlock.getBoundingClientRect();
+            const centerX = rect.left + rect.width / 2;
+            const topY = rect.top - 50;
+            
+            tooltip.style.left = (centerX - 75) + 'px'; // Center 150px wide tooltip
+            tooltip.style.top = Math.max(topY, 10) + 'px';
+            
+            document.body.appendChild(tooltip);
+            eventBlock._tooltip = tooltip; // Store reference for cleanup
+        });
+        
+        eventBlock.addEventListener('mouseleave', function() {
+            if (eventBlock._tooltip) {
+                eventBlock._tooltip.remove();
+                eventBlock._tooltip = null;
+            }
+        });
+        
+        eventsDiv.appendChild(eventBlock);
+    });
+    
+    // Append axis FIRST (so it's behind), then events (on top)
+    container.appendChild(axis);
+    container.appendChild(eventsDiv);
+    wrapper.appendChild(container);
+    timelineContainer.appendChild(wrapper);
+    
+    // Add legend - determine which trains are in the schedule
+    const legend = document.createElement('div');
+    legend.className = 'timeline-legend';
+    
+    // Check which trains are present in the schedule by looking for segment headers
+    const usedTrains = new Set();
+    schedule.forEach(event => {
+        if (event.is_segment_header) {
+            const trainName = event.event.replace('🚆 ', '').trim();
+            usedTrains.add(trainName);
+        }
+    });
+    
+    const items = [];
+    
+    // Add legend items for trains in the schedule
+    if (usedTrains.size > 0) {
+        usedTrains.forEach(trainName => {
+            if (trainName.includes('Southwest')) {
+                items.push({ 
+                    type: 'train', 
+                    label: 'Southwest Chief', 
+                    color: 'linear-gradient(135deg, #8b4513, #c85a2c)',
+                    borderColor: '#d4a574'
+                });
+            } else if (trainName.includes('Lake Shore')) {
+                items.push({ 
+                    type: 'train', 
+                    label: 'Lake Shore Limited', 
+                    color: 'linear-gradient(135deg, #003d82, #1565a0)',
+                    borderColor: '#ffc600'
+                });
+            }
+        });
+    }
+    
+    // Always add layover item
+    items.push({ 
+        type: 'layover', 
+        label: 'Layover Stop', 
+        color: '#FFD700',
+        borderColor: '#FFC700'
+    });
+    
+    items.forEach(item => {
+        const legendItem = document.createElement('div');
+        legendItem.className = 'timeline-legend-item';
+        
+        const box = document.createElement('div');
+        box.className = 'timeline-legend-box';
+        box.style.background = item.color;
+        if (item.borderColor) {
+            box.style.borderLeft = `4px solid ${item.borderColor}`;
+        }
+        
+        const label = document.createElement('span');
+        label.textContent = item.label;
+        
+        legendItem.appendChild(box);
+        legendItem.appendChild(label);
+        legend.appendChild(legendItem);
+    });
+    
+    timelineContainer.appendChild(legend);
+}
+
+// Get appropriate tick interval based on total minutes
+function getTickInterval(totalMinutes) {
+    if (totalMinutes < 120) return 15; // 15-minute intervals for < 2 hours
+    if (totalMinutes < 480) return 30; // 30-minute intervals for < 8 hours
+    if (totalMinutes < 1440) return 120; // 2-hour intervals for < 24 hours
+    return 480; // 8-hour intervals for >= 24 hours
+}
+
+// Format time in short format for axis labels
+function formatTimeShort(date) {
+    return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
 }
 
 // Download schedule as CSV
@@ -638,6 +1044,7 @@ function downloadSchedule() {
 function goBack() {
     document.getElementById('stopsSection').style.display = 'block';
     document.getElementById('scheduleSection').style.display = 'none';
+    document.getElementById('timelineSection').style.display = 'none';
     document.getElementById('stopsSection').scrollIntoView({ behavior: 'smooth' });
 }
 
@@ -650,6 +1057,7 @@ function resetForm() {
     document.getElementById('routesSection').style.display = 'none';
     document.getElementById('stopsSection').style.display = 'none';
     document.getElementById('scheduleSection').style.display = 'none';
+    document.getElementById('timelineSection').style.display = 'none';
     document.querySelector('.planning-section').scrollIntoView({ behavior: 'smooth' });
 }
 
@@ -964,6 +1372,28 @@ async function loadScheduleById(scheduleId) {
 }
 
 // Delete a schedule
+async // Helper function to format time range nicely (e.g., "Nov 14 2:25 PM to Nov 15 5:45 AM")
+function formatTimeRange(startDate, startTimeStr, endDate, endTimeStr) {
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    
+    const parseDate = (dateStr) => new Date(dateStr);
+    const startDateObj = parseDate(startDate);
+    const endDateObj = parseDate(endDate);
+    
+    const startMonth = monthNames[startDateObj.getMonth()];
+    const endMonth = monthNames[endDateObj.getMonth()];
+    const startDay = startDateObj.getDate();
+    const endDay = endDateObj.getDate();
+    
+    const isSameDay = startDate === endDate;
+    
+    if (isSameDay) {
+        return `${startMonth} ${startDay} ${startTimeStr} to ${endTimeStr}`;
+    } else {
+        return `${startMonth} ${startDay} ${startTimeStr} to ${endMonth} ${endDay} ${endTimeStr}`;
+    }
+}
+
 async function deleteScheduleById(scheduleId) {
     try {
         const response = await fetch(`/api/delete-schedule/${scheduleId}`, {
