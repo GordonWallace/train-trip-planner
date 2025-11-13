@@ -3,11 +3,15 @@ import unittest
 import sys
 import os
 import json
+import shutil
+
+# Set testing environment before importing app
+os.environ['TESTING'] = '1'
 
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app import app
+from app import app, SCHEDULES_DIR
 
 
 class TestDirectRouteSchedules(unittest.TestCase):
@@ -277,9 +281,12 @@ class TestConnectionRouteSchedules(unittest.TestCase):
         # Should have substantial number of events (both routes + layover)
         self.assertGreater(len(data['schedule']), 20)
         
-        # Verify no duplicate stops
+        # Verify no duplicate stops (skip segment headers)
         seen = set()
         for event in data['schedule']:
+            # Skip segment headers from duplicate check (they have empty date/time/city)
+            if event.get('is_segment_header'):
+                continue
             event_key = (event['date'], event['time'], event['city'])
             self.assertNotIn(event_key, seen, f"Duplicate event in connection route: {event}")
             seen.add(event_key)
@@ -572,6 +579,274 @@ class TestConnectionRouteSchedules(unittest.TestCase):
                 f"City {city} with 2-hour requested duration should have a layover event (e.g., '2 hour stop')")
 
 
+class TestSaveLoadEdit(unittest.TestCase):
+    """Test save, load, and edit functionality"""
+    
+    @classmethod
+    def setUpClass(cls):
+        """Set up test client"""
+        cls.client = app.test_client()
+    
+    @classmethod
+    def tearDownClass(cls):
+        """Clean up test schedules after all tests"""
+        # Remove the test schedules directory if it exists
+        if os.path.exists(SCHEDULES_DIR):
+            shutil.rmtree(SCHEDULES_DIR)
+    
+    def test_save_and_load_direct_route(self):
+        """Test saving and loading a direct route schedule"""
+        # Generate a schedule
+        response = self.client.post('/api/generate-schedule',
+            json={
+                'route_id': 2,
+                'selected_stops': [{'city': 'Princeton', 'duration': 2}],
+                'start_date': '2025-11-12',
+                'origin_city': 'Chicago',
+                'destination_city': 'Topeka'
+            },
+            content_type='application/json'
+        )
+        self.assertEqual(response.status_code, 200)
+        schedule_data = response.get_json()
+        
+        # Save the schedule
+        save_response = self.client.post('/api/save-schedule',
+            json={
+                'name': 'Test Chicago to Topeka',
+                'schedule_data': {
+                    'route_id': 2,
+                    'origin': 'Chicago',
+                    'destination': 'Topeka',
+                    'start_date': '2025-11-12',
+                    'selected_stops': [{'city': 'Princeton', 'duration': 2}],
+                    'schedule_data': schedule_data,
+                    'route': {'id': 2}
+                }
+            },
+            content_type='application/json'
+        )
+        self.assertEqual(save_response.status_code, 200)
+        save_data = save_response.get_json()
+        schedule_id = save_data['id']
+        
+        # Load the schedule
+        load_response = self.client.get(f'/api/load-schedule/{schedule_id}')
+        self.assertEqual(load_response.status_code, 200)
+        load_data = load_response.get_json()
+        
+        # Verify the loaded schedule matches what was saved
+        self.assertEqual(load_data['schedule_data']['origin'], 'Chicago')
+        self.assertEqual(load_data['schedule_data']['destination'], 'Topeka')
+        self.assertEqual(load_data['schedule_data']['route_id'], 2)
+        self.assertEqual(len(load_data['schedule_data']['selected_stops']), 1)
+        self.assertEqual(load_data['schedule_data']['selected_stops'][0]['city'], 'Princeton')
+        self.assertEqual(load_data['schedule_data']['selected_stops'][0]['duration'], 2)
+    
+    def test_save_and_load_connection_route(self):
+        """Test saving and loading a connection route schedule"""
+        # Generate a connection route schedule
+        response = self.client.post('/api/generate-schedule',
+            json={
+                'route_id': 'conn_1_2',
+                'selected_stops': [{'city': 'Cleveland', 'duration': 2}],
+                'start_date': '2025-11-13',
+                'origin_city': 'New York',
+                'destination_city': 'Los Angeles'
+            },
+            content_type='application/json'
+        )
+        self.assertEqual(response.status_code, 200)
+        schedule_data = response.get_json()
+        
+        # Save the schedule
+        save_response = self.client.post('/api/save-schedule',
+            json={
+                'name': 'Test NY to LA Connection',
+                'schedule_data': {
+                    'route_id': 'conn_1_2',
+                    'origin': 'New York',
+                    'destination': 'Los Angeles',
+                    'start_date': '2025-11-13',
+                    'selected_stops': [{'city': 'Cleveland', 'duration': 2}],
+                    'schedule_data': schedule_data,
+                    'route': {'id': 'conn_1_2'}
+                }
+            },
+            content_type='application/json'
+        )
+        self.assertEqual(save_response.status_code, 200)
+        save_data = save_response.get_json()
+        schedule_id = save_data['id']
+        
+        # Load the schedule
+        load_response = self.client.get(f'/api/load-schedule/{schedule_id}')
+        self.assertEqual(load_response.status_code, 200)
+        load_data = load_response.get_json()
+        
+        # Verify the loaded schedule matches what was saved
+        self.assertEqual(load_data['schedule_data']['origin'], 'New York')
+        self.assertEqual(load_data['schedule_data']['destination'], 'Los Angeles')
+        self.assertEqual(load_data['schedule_data']['route_id'], 'conn_1_2')
+        self.assertEqual(len(load_data['schedule_data']['selected_stops']), 1)
+        self.assertEqual(load_data['schedule_data']['selected_stops'][0]['city'], 'Cleveland')
+        self.assertEqual(load_data['schedule_data']['selected_stops'][0]['duration'], 2)
+    
+    def test_load_schedules_list(self):
+        """Test getting list of all saved schedules"""
+        # Save a test schedule first
+        response = self.client.post('/api/generate-schedule',
+            json={
+                'route_id': 2,
+                'selected_stops': [],
+                'start_date': '2025-11-12',
+                'origin_city': 'Chicago',
+                'destination_city': 'Los Angeles'
+            },
+            content_type='application/json'
+        )
+        schedule_data = response.get_json()
+        
+        save_response = self.client.post('/api/save-schedule',
+            json={
+                'name': 'List Test Schedule',
+                'schedule_data': {
+                    'route_id': 2,
+                    'origin': 'Chicago',
+                    'destination': 'Los Angeles',
+                    'start_date': '2025-11-12',
+                    'selected_stops': [],
+                    'schedule_data': schedule_data,
+                    'route': {'id': 2}
+                }
+            },
+            content_type='application/json'
+        )
+        self.assertEqual(save_response.status_code, 200)
+        
+        # Get the list
+        list_response = self.client.get('/api/load-schedules')
+        self.assertEqual(list_response.status_code, 200)
+        list_data = list_response.get_json()
+        
+        # Verify the response
+        self.assertIn('schedules', list_data)
+        self.assertIsInstance(list_data['schedules'], list)
+        # Should have at least the one we just saved
+        self.assertGreaterEqual(len(list_data['schedules']), 1)
+        
+        # Find our test schedule in the list
+        test_schedule = next((s for s in list_data['schedules'] if s['name'] == 'List Test Schedule'), None)
+        self.assertIsNotNone(test_schedule, "Test schedule should be in the list")
+        self.assertEqual(test_schedule['origin'], 'Chicago')
+        self.assertEqual(test_schedule['destination'], 'Los Angeles')
+    
+    def test_delete_schedule(self):
+        """Test deleting a saved schedule"""
+        # Save a test schedule
+        response = self.client.post('/api/generate-schedule',
+            json={
+                'route_id': 2,
+                'selected_stops': [],
+                'start_date': '2025-11-12',
+                'origin_city': 'Chicago',
+                'destination_city': 'Galesburg'
+            },
+            content_type='application/json'
+        )
+        schedule_data = response.get_json()
+        
+        save_response = self.client.post('/api/save-schedule',
+            json={
+                'name': 'Delete Test Schedule',
+                'schedule_data': {
+                    'route_id': 2,
+                    'origin': 'Chicago',
+                    'destination': 'Galesburg',
+                    'start_date': '2025-11-12',
+                    'selected_stops': [],
+                    'schedule_data': schedule_data,
+                    'route': {'id': 2}
+                }
+            },
+            content_type='application/json'
+        )
+        self.assertEqual(save_response.status_code, 200)
+        schedule_id = save_response.get_json()['id']
+        
+        # Delete the schedule
+        delete_response = self.client.delete(f'/api/delete-schedule/{schedule_id}')
+        self.assertEqual(delete_response.status_code, 200)
+        
+        # Verify it's deleted by trying to load it
+        load_response = self.client.get(f'/api/load-schedule/{schedule_id}')
+        self.assertEqual(load_response.status_code, 404)
+    
+    def test_loaded_schedule_preserves_selected_stops(self):
+        """Test that loaded schedules preserve selected stops when regenerated"""
+        # Generate a schedule with specific stops
+        response = self.client.post('/api/generate-schedule',
+            json={
+                'route_id': 1,
+                'selected_stops': [
+                    {'city': 'Buffalo', 'duration': 3},
+                    {'city': 'Cleveland', 'duration': 2}
+                ],
+                'start_date': '2025-11-13',
+                'origin_city': 'New York',
+                'destination_city': 'Chicago'
+            },
+            content_type='application/json'
+        )
+        self.assertEqual(response.status_code, 200)
+        schedule_data = response.get_json()
+        
+        # Verify the original schedule has our stops
+        buffalo_events = [e for e in schedule_data['schedule'] if e['city'] == 'Buffalo' and 'hour' in e['event'].lower()]
+        self.assertGreater(len(buffalo_events), 0, "Buffalo should have a duration stop in the original schedule")
+        
+        # Save the schedule
+        save_response = self.client.post('/api/save-schedule',
+            json={
+                'name': 'Preserve Stops Test',
+                'schedule_data': {
+                    'route_id': 1,
+                    'origin': 'New York',
+                    'destination': 'Chicago',
+                    'start_date': '2025-11-13',
+                    'selected_stops': [
+                        {'city': 'Buffalo', 'duration': 3},
+                        {'city': 'Cleveland', 'duration': 2}
+                    ],
+                    'schedule_data': schedule_data,
+                    'route': {'id': 1}
+                }
+            },
+            content_type='application/json'
+        )
+        self.assertEqual(save_response.status_code, 200)
+        schedule_id = save_response.get_json()['id']
+        
+        # Load the schedule
+        load_response = self.client.get(f'/api/load-schedule/{schedule_id}')
+        self.assertEqual(load_response.status_code, 200)
+        loaded_data = load_response.get_json()
+        
+        # Verify selected stops are preserved
+        loaded_stops = loaded_data['schedule_data']['selected_stops']
+        self.assertEqual(len(loaded_stops), 2, "Should have 2 selected stops")
+        
+        # Check the specific stops and durations
+        buffalo_stop = next((s for s in loaded_stops if s['city'] == 'Buffalo'), None)
+        self.assertIsNotNone(buffalo_stop, "Buffalo should be in selected stops")
+        self.assertEqual(buffalo_stop['duration'], 3, "Buffalo duration should be preserved")
+        
+        cleveland_stop = next((s for s in loaded_stops if s['city'] == 'Cleveland'), None)
+        self.assertIsNotNone(cleveland_stop, "Cleveland should be in selected stops")
+        self.assertEqual(cleveland_stop['duration'], 2, "Cleveland duration should be preserved")
+
+
 if __name__ == '__main__':
     unittest.main()
+
 

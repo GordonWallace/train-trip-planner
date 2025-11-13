@@ -4,8 +4,20 @@ Flask backend for the train trip planner application.
 from flask import Flask, render_template, jsonify, request
 from database import init_database, get_all_cities, get_routes_between_cities, get_intermediate_stops, get_route_by_id, get_all_routes_from_city, get_routes_through_city_to_destination, get_stops_from_city, get_stops_between_cities
 from datetime import datetime, timedelta
+import os
+import json
+import uuid
 
 app = Flask(__name__)
+
+# Determine which schedules directory to use
+# Tests use a temporary test directory, production uses user_schedules
+if os.environ.get('TESTING'):
+    SCHEDULES_DIR = os.path.join(os.path.dirname(__file__), 'tests', '.test_schedules')
+else:
+    SCHEDULES_DIR = os.path.join(os.path.dirname(__file__), 'user_schedules')
+
+os.makedirs(SCHEDULES_DIR, exist_ok=True)
 
 def calculate_base_schedule_duration(route_id, origin_city, destination_city, start_date):
     """
@@ -67,6 +79,16 @@ def _build_connection_schedule(connection_data, origin_city, destination_city, s
     schedule = []
     current_date = datetime.strptime(start_date, '%Y-%m-%d').date()
     prev_stop_time = None
+    
+    # Add segment 1 header
+    schedule.append({
+        'city': '',
+        'event': f"🚆 {connection_data['route1']['route_name']}",
+        'time': '',
+        'date': '',
+        'route_name': '',
+        'is_segment_header': True
+    })
     
     # Add segment 1 stops
     for i, stop in enumerate(stops1):
@@ -581,6 +603,16 @@ def generate_schedule():
             current_date = datetime.strptime(start_date, '%Y-%m-%d').date()
             prev_stop_time = None
             
+            # Add segment 1 header
+            schedule.append({
+                'city': '',
+                'event': f"🚆 {connection_data['route1']['route_name']}",
+                'time': '',
+                'date': '',
+                'route_name': '',
+                'is_segment_header': True
+            })
+            
             # Add segment 1 stops (with duration logic for selected stops)
             for i, stop in enumerate(stops1):
                 if not stop.get('stop_time'):
@@ -792,15 +824,25 @@ def generate_schedule():
             
             # Calculate total duration
             if schedule:
-                first_event = schedule[0]
-                last_event = schedule[-1]
-                start_dt = datetime.strptime(f"{first_event['date']} {first_event['time']}", '%Y-%m-%d %H:%M')
-                end_dt = datetime.strptime(f"{last_event['date']} {last_event['time']}", '%Y-%m-%d %H:%M')
-                total_duration = end_dt - start_dt
-                hours = int(total_duration.total_seconds() // 3600)
-                days = hours // 24
-                hours = hours % 24
-                duration_str = f"{days} days {hours} hours" if days > 0 else f"{hours} hours"
+                # Find first non-header event with valid date/time
+                first_event = None
+                last_event = None
+                for event in schedule:
+                    if not event.get('is_segment_header') and event.get('date') and event.get('time'):
+                        if first_event is None:
+                            first_event = event
+                        last_event = event  # Keep updating to get the last one
+                
+                if first_event and last_event:
+                    start_dt = datetime.strptime(f"{first_event['date']} {first_event['time']}", '%Y-%m-%d %H:%M')
+                    end_dt = datetime.strptime(f"{last_event['date']} {last_event['time']}", '%Y-%m-%d %H:%M')
+                    total_duration = end_dt - start_dt
+                    hours = int(total_duration.total_seconds() // 3600)
+                    days = hours // 24
+                    hours = hours % 24
+                    duration_str = f"{days} days {hours} hours" if days > 0 else f"{hours} hours"
+                else:
+                    duration_str = "Unknown"
             else:
                 duration_str = "Unknown"
             
@@ -1098,6 +1140,95 @@ def find_next_departure(city, desired_departure_dt, destination):
 def health():
     """Health check endpoint."""
     return jsonify({'status': 'ok'})
+
+
+@app.route('/api/save-schedule', methods=['POST'])
+def save_schedule_endpoint():
+    """Save a schedule to the user_schedules directory."""
+    data = request.json
+    name = data.get('name', 'Untitled Schedule')
+    schedule_data = data.get('schedule_data')
+    
+    if not schedule_data:
+        return jsonify({'error': 'No schedule data provided'}), 400
+    
+    schedule_id = str(uuid.uuid4())
+    schedule_obj = {
+        'id': schedule_id,
+        'name': name,
+        'created_at': datetime.now().isoformat(),
+        'origin': schedule_data.get('origin'),
+        'destination': schedule_data.get('destination'),
+        'date': schedule_data.get('start_date'),
+        'schedule_data': schedule_data
+    }
+    
+    file_path = os.path.join(SCHEDULES_DIR, f'{schedule_id}.json')
+    try:
+        with open(file_path, 'w') as f:
+            json.dump(schedule_obj, f, indent=2)
+        return jsonify({'id': schedule_id, 'message': 'Schedule saved successfully'})
+    except Exception as e:
+        return jsonify({'error': f'Error saving schedule: {str(e)}'}), 500
+
+
+@app.route('/api/load-schedules', methods=['GET'])
+def load_schedules_endpoint():
+    """Load list of all saved schedules."""
+    schedules = []
+    
+    try:
+        if not os.path.exists(SCHEDULES_DIR):
+            return jsonify({'schedules': []})
+        
+        for filename in os.listdir(SCHEDULES_DIR):
+            if filename.endswith('.json'):
+                file_path = os.path.join(SCHEDULES_DIR, filename)
+                with open(file_path, 'r') as f:
+                    schedule = json.load(f)
+                    schedules.append({
+                        'id': schedule['id'],
+                        'name': schedule['name'],
+                        'origin': schedule['origin'],
+                        'destination': schedule['destination'],
+                        'date': schedule['date'],
+                        'created_at': schedule['created_at']
+                    })
+        
+        schedules.sort(key=lambda x: x['created_at'], reverse=True)
+        return jsonify({'schedules': schedules})
+    except Exception as e:
+        return jsonify({'error': f'Error loading schedules: {str(e)}'}), 500
+
+
+@app.route('/api/load-schedule/<schedule_id>', methods=['GET'])
+def load_schedule_endpoint(schedule_id):
+    """Load a specific schedule by ID."""
+    try:
+        file_path = os.path.join(SCHEDULES_DIR, f'{schedule_id}.json')
+        if not os.path.exists(file_path):
+            return jsonify({'error': 'Schedule not found'}), 404
+        
+        with open(file_path, 'r') as f:
+            schedule = json.load(f)
+        
+        return jsonify(schedule)
+    except Exception as e:
+        return jsonify({'error': f'Error loading schedule: {str(e)}'}), 500
+
+
+@app.route('/api/delete-schedule/<schedule_id>', methods=['DELETE'])
+def delete_schedule_endpoint(schedule_id):
+    """Delete a schedule by ID."""
+    try:
+        file_path = os.path.join(SCHEDULES_DIR, f'{schedule_id}.json')
+        if not os.path.exists(file_path):
+            return jsonify({'error': 'Schedule not found'}), 404
+        
+        os.remove(file_path)
+        return jsonify({'message': 'Schedule deleted successfully'})
+    except Exception as e:
+        return jsonify({'error': f'Error deleting schedule: {str(e)}'}), 500
 
 
 if __name__ == '__main__':

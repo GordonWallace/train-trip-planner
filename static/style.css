@@ -70,6 +70,19 @@ footer {
     margin-bottom: 20px;
 }
 
+.form-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 20px;
+}
+
+.form-actions .btn {
+    margin: 0;
+    flex: 1;
+    min-width: 180px;
+}
+
 label {
     display: block;
     margin-bottom: 8px;
@@ -340,11 +353,18 @@ section h2 {
 }
 
 .route1-header {
-    background: linear-gradient(to right, #003d82, #1565a0);
+    background: linear-gradient(to right, #003d82, #1565a0) !important;
+    border-left-color: #ffc600 !important;
 }
 
 .route2-header {
-    background: linear-gradient(to right, #8b4513, #c85a2c);
+    background: linear-gradient(to right, #8b4513, #c85a2c) !important;
+    border-left-color: #d4a574 !important;
+}
+
+.route3-header {
+    background: linear-gradient(to right, #5d4037, #795548) !important;
+    border-left-color: #a1887f !important;
 }
 
 .hub-departure-info {
@@ -417,11 +437,16 @@ section h2 {
     color: white;
 }
 
+.schedule-table thead th {
+    border-bottom: none;
+}
+
 .schedule-table th,
 .schedule-table td {
     padding: 12px 15px;
     text-align: left;
     border-bottom: 1px solid #d0d0d0;
+    border-left: 4px solid transparent;
 }
 
 .schedule-table tbody tr:hover {
@@ -555,4 +580,167 @@ button:focus {
     font-weight: bold;
     border: none;
     border-left: 4px solid #ffc600;
+}
+
+/* Route-specific header styling */
+.route1-header-row {
+    background: linear-gradient(to right, #003d82, #1565a0) !important;
+}
+
+.route1-header-row td {
+    border-left-color: #ffc600 !important;
+}
+
+.route2-header-row {
+    background: linear-gradient(to right, #8b4513, #c85a2c) !important;
+}
+
+.route2-header-row td {
+    border-left-color: #ffc600 !important;
+}
+
+.route3-header-row {
+    background: linear-gradient(to right, #5c3d2e, #7b5c2c) !important;
+}
+
+.route3-header-row td {
+    border-left-color: #ffc600 !important;
+}
+
+/* Route-specific row styling for schedules */
+.route1-row td {
+    border-left-color: #1565a0;
+}
+
+.route2-row td {
+    border-left-color: #c85a2c;
+}
+
+.route3-row td {
+    border-left-color: #7b5c2c;
+}
+
+/* Modal Styles */
+.schedule-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 20px;
+}
+
+.modal-content {
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+    max-width: 600px;
+    width: 100%;
+    max-height: 80vh;
+    overflow-y: auto;
+    padding: 30px;
+    animation: slideUp 0.3s ease-out;
+}
+
+@keyframes slideUp {
+    from {
+        opacity: 0;
+        transform: translateY(30px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.modal-content h3 {
+    color: #003d82;
+    margin-bottom: 25px;
+    font-size: 1.5em;
+    font-weight: 700;
+}
+
+.schedules-list {
+    margin-bottom: 25px;
+    max-height: 55vh;
+    overflow-y: auto;
+}
+
+.schedule-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 18px;
+    margin-bottom: 12px;
+    border: 2px solid #e0e0e0;
+    border-radius: 6px;
+    background: #fafafa;
+    transition: all 0.3s ease;
+}
+
+.schedule-item:hover {
+    border-color: #1565a0;
+    background: #f0f5fb;
+    box-shadow: 0 4px 12px rgba(21, 101, 160, 0.15);
+}
+
+.schedule-info {
+    flex-grow: 1;
+    min-width: 0;
+}
+
+.schedule-info strong {
+    display: block;
+    color: #003d82;
+    font-size: 1.1em;
+    margin-bottom: 6px;
+    word-break: break-word;
+}
+
+.schedule-info p {
+    color: #666;
+    font-size: 0.9em;
+    margin: 0;
+    line-height: 1.4;
+}
+
+.schedule-item button {
+    margin-left: 12px;
+    flex-shrink: 0;
+}
+
+.btn-sm {
+    padding: 8px 16px;
+    font-size: 0.8em;
+    margin: 0;
+}
+
+.btn-danger {
+    background-color: #c62828;
+    color: white;
+}
+
+.btn-danger:hover {
+    background-color: #ad1d1d;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(198, 40, 40, 0.4);
+}
+
+.modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    border-top: 2px solid #e0e0e0;
+    padding-top: 20px;
+    margin-top: 20px;
+}
+
+.modal-close {
+    padding: 10px 24px !important;
+    margin: 0 !important;
 }

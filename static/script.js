@@ -22,6 +22,10 @@ function setupEventListeners() {
     document.getElementById('newTripBtn').addEventListener('click', resetForm);
     document.getElementById('backBtn').addEventListener('click', goBack);
     document.getElementById('downloadBtn').addEventListener('click', downloadSchedule);
+    document.getElementById('editBtn').addEventListener('click', editSchedule);
+    document.getElementById('saveBtn').addEventListener('click', saveSchedule);
+    document.getElementById('loadBtn').addEventListener('click', loadScheduleModal);
+    document.getElementById('loadLandingBtn').addEventListener('click', loadScheduleModal);
 }
 
 // Load all cities
@@ -265,157 +269,155 @@ function displayStops(stops, route, searchOrigin, searchDestination) {
     stopsList.appendChild(destItem);
 }
 
-// Display stops for connection routes (two segments)
-function displayConnectionStops(stops1, stops2, route, searchOrigin, searchDestination) {
+// Helper function to get route-specific styling class
+function getRouteClass(routeId, segmentIndex) {
+    if (routeId === 1) return 'route1';
+    if (routeId === 2) return 'route2';
+    return `route${segmentIndex + 1}`;
+}
+
+// Unified function to render stops for both new routes and editing
+// For new routes, pass an array with 1-2 items: [{stops: [...], route_id: 1}, {stops: [...], route_id: 2}]
+// For editing, pass the same format from the edit function
+function renderSegmentStops(segmentStopsArray, route, searchOrigin, searchDestination, isEditing = false) {
     const stopsList = document.getElementById('stopsList');
     stopsList.innerHTML = '';
+    const connectionHub = route.connection_hub;
     
-    // Add a header for the first route segment at the very beginning
-    const header1 = document.createElement('div');
-    header1.className = 'segment-header route1-header';
-    header1.innerHTML = `<strong>🚆 ${route.route_name.split(' → ')[0]}</strong>`;
-    stopsList.appendChild(header1);
-    
-    // Add origin stop (no checkbox, just like hub departure info)
-    const originItem = document.createElement('div');
-    originItem.className = 'stop-item route1-stop';
-    originItem.innerHTML = `
-        <div class="stop-checkbox-container">
-            <label>${searchOrigin} - <strong>Origin (Departure: ${route.departure_time})</strong></label>
-        </div>
-    `;
-    stopsList.appendChild(originItem);
-    
-    // Find indices for first route
-    let originIndex = -1;
-    let hubIndex = stops1.length - 1;
-    
-    stops1.forEach((stop, index) => {
-        if (stop.city_name === searchOrigin && originIndex === -1) {
-            originIndex = index;
+    segmentStopsArray.forEach((segment, segmentIndex) => {
+        const stops = segment.stops;
+        const isLastSegment = segmentIndex === segmentStopsArray.length - 1;
+        const routeClass = getRouteClass(segment.route_id, segmentIndex);
+        
+        // Add segment header with route-specific styling
+        const header = document.createElement('div');
+        header.className = `segment-header ${routeClass}-header`;
+        
+        // Determine route name based on route_id
+        let headerText = `Segment ${segmentIndex + 1}`;
+        if (segment.route_id === 1) {
+            headerText = 'Lake Shore Limited';
+        } else if (segment.route_id === 2) {
+            headerText = 'Southwest Chief';
         }
-        if (stop.city_name === route.connection_hub) {
-            hubIndex = index;
-        }
-    });
-    
-    // Display stops from origin to hub on first route (skip the origin since we already rendered it)
-    for (let i = originIndex + 1; i <= hubIndex && i < stops1.length; i++) {
-        const stop = stops1[i];
-        const stopItem = document.createElement('div');
-        stopItem.className = 'stop-item route1-stop';
-        const stopId = `stop1-${stop.id}`;
         
-        const isHub = stop.city_name === route.connection_hub;
+        header.innerHTML = `<strong>🚆 ${headerText}</strong>`;
+        stopsList.appendChild(header);
         
-        stopItem.innerHTML = `
-            <div class="stop-checkbox-container">
-                <input type="checkbox" id="${stopId}" data-city="${stop.city_name}">
-                <label for="${stopId}">${stop.city_name}${isHub ? ' - <strong>Connection Hub</strong>' : ''} - Arrival: ${stop.stop_time}</label>
-            </div>
-            <div class="stop-duration-container" id="duration-${stopId}" style="display: none;">
-                <label for="duration-input-${stopId}">Stop duration (hours):</label>
-                <input type="number" id="duration-input-${stopId}" min="0" max="24" step="0.5" value="2" class="duration-input">
-            </div>
-        `;
+        // Find origin and destination indices for this segment
+        let originIndex = -1;
+        let destinationIndex = stops.length - 1;
         
-        const checkbox = stopItem.querySelector('input[type="checkbox"]');
-        const durationContainer = stopItem.querySelector(`#duration-${stopId}`);
+        const segmentOrigin = segmentIndex === 0 ? searchOrigin : connectionHub;
+        const segmentDestination = isLastSegment ? searchDestination : connectionHub;
         
-        checkbox.addEventListener('change', function() {
-            if (this.checked) {
-                stopItem.classList.add('checked');
-                if (durationContainer) durationContainer.style.display = 'flex';
-            } else {
-                stopItem.classList.remove('checked');
-                if (durationContainer) durationContainer.style.display = 'none';
+        stops.forEach((stop, index) => {
+            if (stop.city_name === segmentOrigin && originIndex === -1) {
+                originIndex = index;
+            }
+            if (stop.city_name === segmentDestination) {
+                destinationIndex = index;
             }
         });
         
-        stopsList.appendChild(stopItem);
-    }
-    
-    // Add a header for the second route segment
-    const header2 = document.createElement('div');
-    header2.className = 'segment-header route2-header';
-    header2.innerHTML = `<strong>🚆 ${route.route_name.split(' → ')[1]}</strong>`;
-    stopsList.appendChild(header2);
-    
-    // Add connection hub departure info from second route (after header2)
-    const hubDepartureInfo = document.createElement('div');
-    hubDepartureInfo.className = 'stop-item hub-departure-info';
-    
-    // Find the departure time from the hub on route 2
-    let hubDepartureTime = null;
-    stops2.forEach((stop) => {
-        if (stop.city_name === route.connection_hub && !hubDepartureTime) {
-            hubDepartureTime = stop.stop_time;
+        // Add origin stop (non-selectable)
+        if (originIndex >= 0 && originIndex < stops.length) {
+            const originItem = document.createElement('div');
+            originItem.className = `stop-item checked ${routeClass}-stop`;
+            const stopLabel = segmentIndex === 0 ? 'Origin' : 'Connection Hub';
+            originItem.innerHTML = `
+                <div class="stop-checkbox-container">
+                    <label>${stops[originIndex].city_name} - <strong>${stopLabel} (Departure: ${stops[originIndex].stop_time})</strong></label>
+                </div>
+            `;
+            stopsList.appendChild(originItem);
         }
-    });
-    
-    hubDepartureInfo.innerHTML = `
-        <div class="stop-checkbox-container">
-            <label>${route.connection_hub} - <strong>Departure: ${hubDepartureTime}</strong></label>
-        </div>
-    `;
-    stopsList.appendChild(hubDepartureInfo);
-    
-    // Find indices for second route
-    let hubIndex2 = -1;
-    let destIndex2 = stops2.length - 1;
-    
-    stops2.forEach((stop, index) => {
-        if (stop.city_name === route.connection_hub && hubIndex2 === -1) {
-            hubIndex2 = index;
+        
+        // Add intermediate stops (selectable)
+        for (let i = originIndex + 1; i < destinationIndex && i < stops.length; i++) {
+            const stop = stops[i];
+            const stopItem = document.createElement('div');
+            stopItem.className = `stop-item ${routeClass}-stop`;
+            const stopId = isEditing ? `stop-${segmentIndex}-${stop.id}` : `stop${segment.route_id}-${stop.id}`;
+            
+            stopItem.innerHTML = `
+                <div class="stop-checkbox-container">
+                    <input type="checkbox" id="${stopId}" data-city="${stop.city_name}">
+                    <label for="${stopId}">${stop.city_name} - Arrival: ${stop.stop_time}</label>
+                </div>
+                <div class="stop-duration-container" id="duration-${stopId}" style="display: none;">
+                    <label for="duration-input-${stopId}">Stop duration (hours):</label>
+                    <input type="number" id="duration-input-${stopId}" min="0" max="24" step="0.5" value="2" class="duration-input">
+                </div>
+            `;
+            
+            const checkbox = stopItem.querySelector('input[type="checkbox"]');
+            const durationContainer = stopItem.querySelector(`#duration-${stopId}`);
+            
+            checkbox.addEventListener('change', function() {
+                if (this.checked) {
+                    stopItem.classList.add('checked');
+                    durationContainer.style.display = 'flex';
+                } else {
+                    stopItem.classList.remove('checked');
+                    durationContainer.style.display = 'none';
+                }
+            });
+            
+            stopsList.appendChild(stopItem);
         }
-        if (stop.city_name === searchDestination) {
-            destIndex2 = index;
-        }
-    });
-    
-    // Display stops from hub to destination on second route (skip hub as it's shown in segment 1)
-    for (let i = hubIndex2 + 1; i < destIndex2 && i < stops2.length; i++) {
-        const stop = stops2[i];
-        const stopItem = document.createElement('div');
-        stopItem.className = 'stop-item route2-stop';
-        const stopId = `stop2-${stop.id}`;
         
-        stopItem.innerHTML = `
-            <div class="stop-checkbox-container">
-                <input type="checkbox" id="${stopId}" data-city="${stop.city_name}">
-                <label for="${stopId}">${stop.city_name} - Arrival: ${stop.stop_time}</label>
-            </div>
-            <div class="stop-duration-container" id="duration-${stopId}" style="display: none;">
-                <label for="duration-input-${stopId}">Stop duration (hours):</label>
-                <input type="number" id="duration-input-${stopId}" min="0" max="24" step="0.5" value="2" class="duration-input">
-            </div>
-        `;
-        
-        const checkbox = stopItem.querySelector('input[type="checkbox"]');
-        const durationContainer = stopItem.querySelector(`#duration-${stopId}`);
-        
-        checkbox.addEventListener('change', function() {
-            if (this.checked) {
-                stopItem.classList.add('checked');
-                durationContainer.style.display = 'flex';
-            } else {
-                stopItem.classList.remove('checked');
-                durationContainer.style.display = 'none';
+        // Add hub departure info (only for non-last segments in new routes)
+        if (!isEditing && !isLastSegment) {
+            const hubDepartureInfo = document.createElement('div');
+            hubDepartureInfo.className = `stop-item hub-departure-info`;
+            
+            let hubDepartureTime = null;
+            if (segmentIndex + 1 < segmentStopsArray.length) {
+                const nextSegment = segmentStopsArray[segmentIndex + 1];
+                nextSegment.stops.forEach((stop) => {
+                    if (stop.city_name === connectionHub && !hubDepartureTime) {
+                        hubDepartureTime = stop.stop_time;
+                    }
+                });
             }
-        });
+            
+            hubDepartureInfo.innerHTML = `
+                <div class="stop-checkbox-container">
+                    <label>${connectionHub} - <strong>Departure: ${hubDepartureTime}</strong></label>
+                </div>
+            `;
+            stopsList.appendChild(hubDepartureInfo);
+        }
         
-        stopsList.appendChild(stopItem);
-    }
-    
-    // Add destination (no checkbox, just like hub departure info)
-    const destItem = document.createElement('div');
-    destItem.className = 'stop-item route2-stop';
-    destItem.innerHTML = `
-        <div class="stop-checkbox-container">
-            <label>${searchDestination} - <strong>Destination (Arrival: ${route.arrival_time})</strong></label>
-        </div>
-    `;
-    stopsList.appendChild(destItem);
+        // Add destination stop (non-selectable)
+        if (destinationIndex >= 0 && destinationIndex < stops.length) {
+            const destItem = document.createElement('div');
+            const destLabel = isLastSegment ? 'Destination' : 'Connection Hub';
+            const arrivalTime = isLastSegment ? (isEditing ? route.arrival_time : route.arrival_time) : stops[destinationIndex].stop_time;
+            destItem.className = `stop-item checked ${routeClass}-stop`;
+            destItem.innerHTML = `
+                <div class="stop-checkbox-container">
+                    <label>${stops[destinationIndex].city_name} - <strong>${destLabel} (${isLastSegment ? 'Arrival' : 'Arrival'}: ${arrivalTime})</strong></label>
+                </div>
+            `;
+            stopsList.appendChild(destItem);
+        }
+    });
+}
+
+// Display stops for connection routes (two segments) - now uses unified renderer
+function displayConnectionStops(stops1, stops2, route, searchOrigin, searchDestination) {
+    const segmentStopsArray = [
+        { route_id: 1, stops: stops1 },
+        { route_id: 2, stops: stops2 }
+    ];
+    renderSegmentStops(segmentStopsArray, route, searchOrigin, searchDestination, false);
+}
+
+// Display stops for connection routes during edit - now uses unified renderer
+function displayConnectionStopsForEdit(segmentStopsArray, route, searchOrigin, searchDestination) {
+    renderSegmentStops(segmentStopsArray, route, searchOrigin, searchDestination, true);
 }
 
 // Generate the trip schedule
@@ -426,21 +428,47 @@ async function generateSchedule() {
     const originCity = document.getElementById('origin').value;
     const destinationCity = document.getElementById('destination').value;
     
-    // Get all checked intermediate stops with their durations (excluding disabled checkboxes)
-    document.querySelectorAll('.stop-item input[type="checkbox"]:checked:not(:disabled)').forEach(checkbox => {
-        const city = checkbox.getAttribute('data-city');
-        if (city) {
-            // Find the duration input for this stop
-            const stopId = checkbox.id;
-            const durationInput = document.querySelector(`#duration-input-${stopId}`);
-            const duration = durationInput ? parseFloat(durationInput.value) : 0;
-            
-            selectedStopsData.push({
-                city: city,
-                duration: duration
-            });
+    // Check if we have a saved state from localStorage (e.g., from loading a schedule)
+    // But only use it if the stops section is visible (meaning we just loaded and haven't edited yet)
+    const stopsSection = document.getElementById('stopsSection');
+    const savedState = localStorage.getItem('currentSchedule');
+    let selectedStops = null;
+    
+    if (savedState && stopsSection.style.display === 'none') {
+        // We're using a saved state and haven't shown the stops section for editing yet
+        try {
+            const state = JSON.parse(savedState);
+            if (state.selected_stops && state.selected_stops.length > 0) {
+                // Use the saved selected stops instead of reading from checkboxes
+                selectedStops = state.selected_stops;
+            }
+        } catch (e) {
+            console.error('Error parsing saved state:', e);
         }
-    });
+    }
+    
+    // If we have saved stops to use (fresh from loading), use them; otherwise read from checked checkboxes
+    if (selectedStops) {
+        selectedStopsData.push(...selectedStops);
+        // Clear localStorage so we don't reuse this state on the next schedule generation
+        localStorage.removeItem('currentSchedule');
+    } else {
+        // Get all checked intermediate stops with their durations (excluding disabled checkboxes)
+        document.querySelectorAll('.stop-item input[type="checkbox"]:checked:not(:disabled)').forEach(checkbox => {
+            const city = checkbox.getAttribute('data-city');
+            if (city) {
+                // Find the duration input for this stop
+                const stopId = checkbox.id;
+                const durationInput = document.querySelector(`#duration-input-${stopId}`);
+                const duration = durationInput ? parseFloat(durationInput.value) : 0;
+                
+                selectedStopsData.push({
+                    city: city,
+                    duration: duration
+                });
+            }
+        });
+    }
     
     const startDate = document.getElementById('startDate').value;
     
@@ -469,7 +497,7 @@ async function generateSchedule() {
         const data = await response.json();
         
         if (response.ok) {
-            displaySchedule(data);
+            displaySchedule(data, selectedStopsData);
             document.getElementById('stopsSection').style.display = 'none';
             document.getElementById('routesSection').style.display = 'none';
             document.getElementById('scheduleSection').style.display = 'block';
@@ -486,14 +514,21 @@ async function generateSchedule() {
 }
 
 // Display the generated schedule
-function displaySchedule(data) {
+function displaySchedule(data, selectedStopsData = null) {
     document.getElementById('scheduleTitleRoute').textContent = `Trip Schedule - ${data.route_name} (${data.total_duration})`;
     
     const scheduleBody = document.getElementById('scheduleBody');
     scheduleBody.innerHTML = '';
     
+    let currentRouteName = null;
+    let routeIndex = 0;
+    let hasBackendHeaders = false;
+    
+    // First pass: check if backend provided segment headers
+    hasBackendHeaders = data.schedule.some(event => event.is_segment_header);
+    
     data.schedule.forEach((event) => {
-        // Handle explicit segment headers from backend
+        // Handle explicit segment headers from backend (for connections)
         if (event.is_segment_header) {
             const headerRow = document.createElement('tr');
             headerRow.className = 'segment-header-row';
@@ -501,14 +536,58 @@ function displaySchedule(data) {
                 <td colspan="4"><strong>${event.event}</strong></td>
             `;
             scheduleBody.appendChild(headerRow);
+            // Extract and update the current route name from the header
+            currentRouteName = event.event.replace('🚆 ', '');
+            
+            // Apply route-specific styling to header
+            if (currentRouteName.includes('Lake Shore')) {
+                headerRow.classList.add('route1-header-row');
+            } else if (currentRouteName.includes('Southwest')) {
+                headerRow.classList.add('route2-header-row');
+            } else if (routeIndex >= 3) {
+                headerRow.classList.add('route3-header-row');
+            }
+            
+            routeIndex++;
             return;
+        }
+        
+        // For direct routes without backend headers, add a header on first event
+        if (!hasBackendHeaders && event.route_name && event.route_name !== currentRouteName) {
+            const headerRow = document.createElement('tr');
+            headerRow.className = 'segment-header-row';
+            headerRow.innerHTML = `
+                <td colspan="4"><strong>🚆 ${event.route_name}</strong></td>
+            `;
+            scheduleBody.appendChild(headerRow);
+            currentRouteName = event.route_name;
+            
+            // Apply route-specific styling to header
+            if (currentRouteName.includes('Lake Shore')) {
+                headerRow.classList.add('route1-header-row');
+            } else if (currentRouteName.includes('Southwest')) {
+                headerRow.classList.add('route2-header-row');
+            } else if (routeIndex >= 3) {
+                headerRow.classList.add('route3-header-row');
+            }
+            
+            routeIndex++;
         }
         
         const row = document.createElement('tr');
         
+        // Apply route-specific styling class based on current route name
+        if (currentRouteName && currentRouteName.includes('Lake Shore')) {
+            row.classList.add('route1-row');
+        } else if (currentRouteName && currentRouteName.includes('Southwest')) {
+            row.classList.add('route2-row');
+        } else if (routeIndex >= 3) {
+            row.classList.add('route3-row');
+        }
+        
         // Check if this is a stop duration row or layover row
         if (event.event.includes('hour stop') || event.event.includes('layover')) {
-            row.className = 'duration-row';
+            row.classList.add('duration-row');
         }
         
         row.innerHTML = `
@@ -519,6 +598,9 @@ function displaySchedule(data) {
         `;
         scheduleBody.appendChild(row);
     });
+    
+    // Save the current schedule state for editing, passing the selected stops
+    saveScheduleState(data, selectedStopsData);
 }
 
 // Download schedule as CSV
@@ -598,3 +680,304 @@ function showError(message) {
         error.remove();
     }, 5000);
 }
+
+// ==================== EDIT/SAVE/LOAD FUNCTIONALITY ====================
+
+// Save the current schedule state to localStorage
+function saveScheduleState(scheduleData, selectedStopsData = null) {
+    let selectedStops = [];
+    
+    // If selectedStopsData is provided (e.g., from a loaded schedule), use it
+    if (selectedStopsData && Array.isArray(selectedStopsData)) {
+        selectedStops = selectedStopsData;
+    } else {
+        // Otherwise, read from the DOM checkboxes (for newly generated schedules)
+        document.querySelectorAll('.stop-item input[type="checkbox"]:checked:not(:disabled)').forEach(checkbox => {
+            const city = checkbox.getAttribute('data-city');
+            if (city) {
+                const stopId = checkbox.id;
+                const durationInput = document.querySelector(`#duration-input-${stopId}`);
+                const duration = durationInput ? parseFloat(durationInput.value) : 0;
+                selectedStops.push({ city, duration });
+            }
+        });
+    }
+    
+    const state = {
+        route_id: currentRoute.id,
+        origin: document.getElementById('origin').value,
+        destination: document.getElementById('destination').value,
+        start_date: document.getElementById('startDate').value,
+        selected_stops: selectedStops,
+        schedule_data: scheduleData,
+        route: currentRoute  // Store the full route object
+    };
+    
+    localStorage.setItem('currentSchedule', JSON.stringify(state));
+}
+
+// Edit the current schedule (go back to stops selection with previous choices)
+async function editSchedule() {
+    const state = JSON.parse(localStorage.getItem('currentSchedule'));
+    if (!state) {
+        showError('No schedule to edit');
+        return;
+    }
+    
+    // Restore form values
+    document.getElementById('origin').value = state.origin;
+    document.getElementById('destination').value = state.destination;
+    document.getElementById('startDate').value = state.start_date;
+    
+    // Restore currentRoute
+    currentRoute = state.route || { id: state.route_id };
+    
+    showLoading(true);
+    
+    try {
+        // Check if this is a connection route (contains 'conn_' in the ID)
+        const routeId = currentRoute.id;
+        const isConnection = String(routeId).includes('conn_');
+        
+        if (isConnection) {
+            // For connection routes, we need to parse the route IDs and fetch stops for each segment
+            // Route ID format: 'conn_1_2' means routes 1 and 2, 'conn_1_2_3' means routes 1, 2, and 3
+            const routeParts = String(routeId).split('_').slice(1).map(Number);
+            
+            try {
+                // Fetch stops for each route segment
+                const allSegmentStops = [];
+                for (const rid of routeParts) {
+                    const response = await fetch(`/api/stops/${rid}`);
+                    if (!response.ok) {
+                        throw new Error(`Failed to fetch stops for route ${rid}`);
+                    }
+                    const data = await response.json();
+                    allSegmentStops.push({
+                        route_id: rid,
+                        stops: data.stops || []
+                    });
+                }
+                
+                // Display connection stops with all segments
+                displayConnectionStopsForEdit(allSegmentStops, currentRoute, state.origin, state.destination);
+            } catch (error) {
+                console.error('Error fetching connection route stops:', error);
+                showError('Error loading connection route stops');
+                showLoading(false);
+                return;
+            }
+        } else {
+            // For direct routes, fetch the stops from the backend
+            const response = await fetch(`/api/stops/${routeId}`);
+            if (!response.ok) {
+                throw new Error(`Failed to fetch stops: ${response.status}`);
+            }
+            const data = await response.json();
+            
+            // Display stops with previous selections
+            displayStops(data.stops || [], currentRoute, state.origin, state.destination);
+        }
+        
+        // Re-select the previous stops
+        // Use setTimeout to ensure DOM is updated before trying to select checkboxes
+        setTimeout(() => {
+            state.selected_stops.forEach(stop => {
+                const checkbox = document.querySelector(`input[data-city="${stop.city}"]:not(:disabled)`);
+                if (checkbox) {
+                    checkbox.checked = true;
+                    const stopId = checkbox.id;
+                    const durationInput = document.querySelector(`#duration-input-${stopId}`);
+                    if (durationInput) {
+                        durationInput.value = stop.duration;
+                    }
+                    // Trigger the change event to show the duration input
+                    checkbox.dispatchEvent(new Event('change'));
+                }
+            });
+        }, 0);
+        
+        // Hide schedule, show stops
+        document.getElementById('scheduleSection').style.display = 'none';
+        document.getElementById('stopsSection').style.display = 'block';
+        document.getElementById('stopsSection').scrollIntoView({ behavior: 'smooth' });
+    } catch (error) {
+        console.error('Error loading stops for edit:', error);
+        showError('Error loading stops for editing');
+    } finally {
+        showLoading(false);
+    }
+}
+
+// Save the current schedule to a file
+async function saveSchedule() {
+    const state = JSON.parse(localStorage.getItem('currentSchedule'));
+    if (!state) {
+        showError('No schedule to save');
+        return;
+    }
+    
+    // Prompt for schedule name
+    const scheduleName = prompt('Enter a name for this schedule:', `Schedule-${new Date().toLocaleDateString()}`);
+    if (!scheduleName) return;
+    
+    showLoading(true);
+    
+    try {
+        const response = await fetch('/api/save-schedule', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                name: scheduleName,
+                schedule_data: state
+            })
+        });
+        
+        if (response.ok) {
+            showError(`Schedule "${scheduleName}" saved successfully!`);
+        } else {
+            const data = await response.json();
+            showError(data.error || 'Error saving schedule');
+        }
+    } catch (error) {
+        console.error('Error saving schedule:', error);
+        showError('Error saving schedule');
+    } finally {
+        showLoading(false);
+    }
+}
+
+// Load a saved schedule
+async function loadScheduleModal() {
+    showLoading(true);
+    
+    try {
+        const response = await fetch('/api/load-schedules');
+        const data = await response.json();
+        
+        if (!data.schedules || data.schedules.length === 0) {
+            showError('No saved schedules found');
+            showLoading(false);
+            return;
+        }
+        
+        // Create a modal to select a schedule
+        const modal = document.createElement('div');
+        modal.className = 'schedule-modal';
+        modal.innerHTML = `
+            <div class="modal-content">
+                <h3>Load Saved Schedule</h3>
+                <div class="schedules-list"></div>
+                <div class="modal-actions">
+                    <button class="btn btn-secondary modal-close">Cancel</button>
+                </div>
+            </div>
+        `;
+        
+        const schedulesList = modal.querySelector('.schedules-list');
+        data.schedules.forEach(schedule => {
+            const item = document.createElement('div');
+            item.className = 'schedule-item';
+            item.innerHTML = `
+                <div class="schedule-info">
+                    <strong>${schedule.name}</strong>
+                    <p>${schedule.origin} → ${schedule.destination} (${schedule.date})</p>
+                </div>
+                <button class="btn btn-sm btn-primary load-schedule-btn" data-id="${schedule.id}">Load</button>
+                <button class="btn btn-sm btn-danger delete-schedule-btn" data-id="${schedule.id}">Delete</button>
+            `;
+            schedulesList.appendChild(item);
+        });
+        
+        // Add close button handler
+        modal.querySelector('.modal-close').addEventListener('click', () => {
+            modal.remove();
+            showLoading(false);
+        });
+        
+        // Add load handlers
+        modal.querySelectorAll('.load-schedule-btn').forEach(btn => {
+            btn.addEventListener('click', async (e) => {
+                const scheduleId = e.target.getAttribute('data-id');
+                await loadScheduleById(scheduleId);
+                modal.remove();
+            });
+        });
+        
+        // Add delete handlers
+        modal.querySelectorAll('.delete-schedule-btn').forEach(btn => {
+            btn.addEventListener('click', async (e) => {
+                const scheduleId = e.target.getAttribute('data-id');
+                if (confirm('Are you sure you want to delete this schedule?')) {
+                    await deleteScheduleById(scheduleId);
+                    location.reload();
+                }
+            });
+        });
+        
+        document.body.appendChild(modal);
+        showLoading(false);
+    } catch (error) {
+        console.error('Error loading schedules:', error);
+        showError('Error loading schedules');
+        showLoading(false);
+    }
+}
+
+// Load a specific schedule by ID
+async function loadScheduleById(scheduleId) {
+    showLoading(true);
+    
+    try {
+        const response = await fetch(`/api/load-schedule/${scheduleId}`);
+        const data = await response.json();
+        
+        const state = data.schedule_data;
+        
+        // Clear any previous selections from the DOM
+        document.getElementById('stopsList').innerHTML = '';
+        document.getElementById('stopsSection').style.display = 'none';
+        document.getElementById('routesSection').style.display = 'none';
+        
+        // Restore form values
+        document.getElementById('origin').value = state.origin;
+        document.getElementById('destination').value = state.destination;
+        document.getElementById('startDate').value = state.start_date;
+        
+        // Restore currentRoute
+        currentRoute = { id: state.route_id };
+        
+        // Save to localStorage
+        localStorage.setItem('currentSchedule', JSON.stringify(state));
+        
+        // Generate the schedule
+        await generateSchedule();
+        
+    } catch (error) {
+        console.error('Error loading schedule:', error);
+        showError('Error loading schedule');
+    } finally {
+        showLoading(false);
+    }
+}
+
+// Delete a schedule
+async function deleteScheduleById(scheduleId) {
+    try {
+        const response = await fetch(`/api/delete-schedule/${scheduleId}`, {
+            method: 'DELETE'
+        });
+        
+        if (response.ok) {
+            showError('Schedule deleted successfully');
+        } else {
+            showError('Error deleting schedule');
+        }
+    } catch (error) {
+        console.error('Error deleting schedule:', error);
+        showError('Error deleting schedule');
+    }
+}
+
